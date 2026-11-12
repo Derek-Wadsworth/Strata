@@ -1,0 +1,24 @@
+# Binaries
+/strata
+/strata.exe
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test / coverage
+*.test
+*.out
+coverage.html
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local app data (if ever created in-repo)
+*.db
+objects/

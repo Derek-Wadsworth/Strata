@@ -2,8 +2,6 @@
 
 Personal file version tracker for local work. Strata watches files you choose, saves a new version on each change, shows diffs between versions, reports editing statistics, and links related files into a graph.
 
-Working CLI name: **chronicle**. Rename whenever you like.
-
 ## Goals
 
 - Track selected files and automatically create a version on each save
@@ -24,7 +22,7 @@ Working CLI name: **chronicle**. Rename whenever you like.
 ```
 +-------------------------------------------------+
 | Frontends                                       |
-| CLI (cmd/chronicle)          GUI (Wails, later) |
+| CLI (cmd/strata)             GUI (Wails, later) |
 +------------------------+------------------------+
                          |
 +------------------------v------------------------+
