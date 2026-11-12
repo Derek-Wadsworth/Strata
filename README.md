@@ -43,9 +43,16 @@ The core library knows nothing about the CLI or GUI. Both frontends call the sam
 | Text diff | sergi/go-diff |
 | GUI (later) | Wails |
 
+## Quick start
+
+```bash
+go run ./cmd/strata version
+go run ./cmd/strata watch path\to\file.txt
+```
+
 ## Status
 
-Early setup. Building milestone by milestone, CLI first, GUI last.
+Milestone 1 in progress: file watching with debounce. Building milestone by milestone, CLI first, GUI last.
 
 ## License
 
