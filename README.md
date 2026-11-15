@@ -52,7 +52,7 @@ go run ./cmd/strata watch path\to\file.txt
 
 ## Status
 
-Milestone 1 in progress: file watching with debounce. Building milestone by milestone, CLI first, GUI last.
+Milestone 2 complete: content-addressed snapshot store with tests. Building milestone by milestone, CLI first, GUI last.
 
 ## License
 
