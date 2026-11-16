@@ -47,12 +47,18 @@ The core library knows nothing about the CLI or GUI. Both frontends call the sam
 
 ```bash
 go run ./cmd/strata version
+go run ./cmd/strata add path\to\file.txt
+go run ./cmd/strata list
+go run ./cmd/strata run
+go run ./cmd/strata remove path\to\file.txt
 go run ./cmd/strata watch path\to\file.txt
 ```
 
+Data lives under `%APPDATA%\Strata` on Windows (or `~/.strata` on macOS/Linux).
+
 ## Status
 
-Milestone 2 complete: content-addressed snapshot store with tests. Building milestone by milestone, CLI first, GUI last.
+Milestone 3 complete: track files, snapshot on save, list/remove. Building milestone by milestone, CLI first, GUI last.
 
 ## License
 
