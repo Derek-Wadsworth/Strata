@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Derek-Wadsworth/Strata/internal/db"
+	"github.com/Derek-Wadsworth/Strata/internal/diff"
 	"github.com/Derek-Wadsworth/Strata/internal/store"
 	"github.com/Derek-Wadsworth/Strata/internal/watcher"
 )
@@ -58,7 +59,8 @@ func (t *Tracker) Add(path string) (versionNum int, err error) {
 		return 0, fmt.Errorf("snapshot: %w", err)
 	}
 
-	if _, err := t.db.InsertVersion(fileID, hash, info.Size(), time.Now()); err != nil {
+	added, removed := t.lineStatsAgainstLatest(fileID, hash)
+	if _, err := t.db.InsertVersion(fileID, hash, info.Size(), time.Now(), added, removed); err != nil {
 		return 0, err
 	}
 
@@ -141,7 +143,11 @@ func (t *Tracker) SnapshotIfChanged(path string) (SnapshotResult, error) {
 		return SnapshotResult{Path: abs, Hash: hash, VersionNum: n, Skipped: true}, nil
 	}
 
-	if _, err := t.db.InsertVersion(f.ID, hash, info.Size(), time.Now()); err != nil {
+	var added, removed *int
+	if ok {
+		added, removed = t.lineStats(latest.Hash, hash)
+	}
+	if _, err := t.db.InsertVersion(f.ID, hash, info.Size(), time.Now(), added, removed); err != nil {
 		return SnapshotResult{}, err
 	}
 	n, err := t.db.CountVersions(f.ID)
@@ -214,10 +220,12 @@ func (t *Tracker) Run(ctx context.Context, onVersion func(SnapshotResult)) error
 
 // HistoryEntry is one version in a file's timeline.
 type HistoryEntry struct {
-	Number    int
-	CreatedAt time.Time
-	Size      int64
-	Hash      string
+	Number       int
+	CreatedAt    time.Time
+	Size         int64
+	Hash         string
+	LinesAdded   *int
+	LinesRemoved *int
 }
 
 // History lists versions for path, oldest first as version 1, 2, ...
@@ -233,13 +241,95 @@ func (t *Tracker) History(path string) ([]HistoryEntry, error) {
 	out := make([]HistoryEntry, 0, len(versions))
 	for i, v := range versions {
 		out = append(out, HistoryEntry{
-			Number:    i + 1,
-			CreatedAt: v.CreatedAt,
-			Size:      v.Size,
-			Hash:      v.Hash,
+			Number:       i + 1,
+			CreatedAt:    v.CreatedAt,
+			Size:         v.Size,
+			Hash:         v.Hash,
+			LinesAdded:   v.LinesAdded,
+			LinesRemoved: v.LinesRemoved,
 		})
 	}
 	return out, nil
+}
+
+// DiffResult is a compare between two versions of a tracked file.
+type DiffResult struct {
+	Path    string
+	FromVer int
+	ToVer   int
+	Diff    diff.Result
+}
+
+// Diff compares two versions of path.
+// If fromVer and toVer are both 0, compares previous vs latest.
+func (t *Tracker) Diff(path string, fromVer, toVer int) (DiffResult, error) {
+	f, err := t.fileByPath(path)
+	if err != nil {
+		return DiffResult{}, err
+	}
+
+	n, err := t.db.CountVersions(f.ID)
+	if err != nil {
+		return DiffResult{}, err
+	}
+	if fromVer == 0 && toVer == 0 {
+		if n < 2 {
+			return DiffResult{}, fmt.Errorf("need at least 2 versions to diff; got %d", n)
+		}
+		fromVer, toVer = n-1, n
+	} else if fromVer == 0 || toVer == 0 {
+		return DiffResult{}, fmt.Errorf("both versions are required (got %d and %d)", fromVer, toVer)
+	}
+
+	oldVer, err := t.db.VersionByNumber(f.ID, fromVer)
+	if err != nil {
+		return DiffResult{}, err
+	}
+	newVer, err := t.db.VersionByNumber(f.ID, toVer)
+	if err != nil {
+		return DiffResult{}, err
+	}
+
+	oldData, err := t.store.Load(oldVer.Hash)
+	if err != nil {
+		return DiffResult{}, fmt.Errorf("load version %d: %w", fromVer, err)
+	}
+	newData, err := t.store.Load(newVer.Hash)
+	if err != nil {
+		return DiffResult{}, fmt.Errorf("load version %d: %w", toVer, err)
+	}
+
+	return DiffResult{
+		Path:    f.Path,
+		FromVer: fromVer,
+		ToVer:   toVer,
+		Diff:    diff.Compare(oldData, newData),
+	}, nil
+}
+
+func (t *Tracker) lineStatsAgainstLatest(fileID int64, newHash string) (added, removed *int) {
+	latest, ok, err := t.db.LatestVersion(fileID)
+	if err != nil || !ok {
+		return nil, nil
+	}
+	return t.lineStats(latest.Hash, newHash)
+}
+
+func (t *Tracker) lineStats(oldHash, newHash string) (added, removed *int) {
+	oldData, err := t.store.Load(oldHash)
+	if err != nil {
+		return nil, nil
+	}
+	newData, err := t.store.Load(newHash)
+	if err != nil {
+		return nil, nil
+	}
+	res := diff.Compare(oldData, newData)
+	if res.Binary {
+		return nil, nil
+	}
+	a, r := res.LinesAdded, res.LinesRemoved
+	return &a, &r
 }
 
 // Show returns the content of a 1-based version.
