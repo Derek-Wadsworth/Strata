@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -12,6 +13,8 @@ import (
 	"time"
 
 	"github.com/Derek-Wadsworth/Strata/internal/appdata"
+	"github.com/Derek-Wadsworth/Strata/internal/config"
+	"github.com/Derek-Wadsworth/Strata/internal/daemon"
 	"github.com/Derek-Wadsworth/Strata/internal/db"
 	"github.com/Derek-Wadsworth/Strata/internal/diff"
 	"github.com/Derek-Wadsworth/Strata/internal/store"
@@ -74,9 +77,13 @@ func run(args []string) error {
 				return nil
 			}
 			w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(w, "VERSIONS\tPATH")
+			fmt.Fprintln(w, "VERSIONS\tSTATUS\tPATH")
 			for _, f := range files {
-				fmt.Fprintf(w, "%d\t%s\n", f.VersionCount, f.Path)
+				status := "ok"
+				if f.Missing {
+					status = "missing"
+				}
+				fmt.Fprintf(w, "%d\t%s\t%s\n", f.VersionCount, status, f.Path)
 			}
 			return w.Flush()
 		})
@@ -94,21 +101,48 @@ func run(args []string) error {
 		})
 	case "run":
 		return withTracker(func(t *tracker.Tracker) error {
-			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-			defer stop()
-
-			files, err := t.List()
-			if err != nil {
-				return err
-			}
-			fmt.Printf("watching %d file(s) (Ctrl+C to stop)\n", len(files))
-			for _, f := range files {
-				fmt.Printf("  %s\n", f.Path)
-			}
-			return t.Run(ctx, func(res tracker.SnapshotResult) {
-				fmt.Printf("version %d: %s\n", res.VersionNum, res.Path)
-			})
+			return runForeground(t, true)
 		})
+	case "start":
+		dataDir, err := resolveDataDir()
+		if err != nil {
+			return err
+		}
+		st, err := daemon.Start(dataDir)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("daemon started (pid %d)\n", st.PID)
+		fmt.Printf("log: %s\n", appdata.LogPath(dataDir))
+		return nil
+	case "stop":
+		dataDir, err := resolveDataDir()
+		if err != nil {
+			return err
+		}
+		if err := daemon.Stop(dataDir); err != nil {
+			return err
+		}
+		fmt.Println("daemon stopped")
+		return nil
+	case "status":
+		dataDir, err := resolveDataDir()
+		if err != nil {
+			return err
+		}
+		st, err := daemon.ReadStatus(dataDir)
+		if err != nil {
+			return err
+		}
+		if st.Running {
+			fmt.Printf("running (pid %d)\n", st.PID)
+		} else {
+			fmt.Println("not running")
+		}
+		return nil
+	case "daemon":
+		// Internal entrypoint used by `strata start`.
+		return runDaemon()
 	case "history":
 		if len(args) != 2 {
 			return fmt.Errorf("usage: strata history <file>")
@@ -208,6 +242,9 @@ func usageText() string {
   strata list
   strata remove <file>
   strata run
+  strata start
+  strata stop
+  strata status
   strata history <file>
   strata diff <file> [--stat]
   strata diff <file> <v1> <v2> [--stat]
@@ -278,21 +315,148 @@ func formatLineStats(added, removed *int) string {
 }
 
 func withTracker(fn func(*tracker.Tracker) error) error {
-	dataDir, err := appdata.EnsureDir()
-	if err != nil {
-		return err
-	}
-	database, err := db.Open(appdata.DBPath(dataDir))
+	_, t, database, _, err := openTracker(nil)
 	if err != nil {
 		return err
 	}
 	defer database.Close()
+	return fn(t)
+}
 
+func resolveDataDir() (string, error) {
+	base, err := appdata.EnsureDir()
+	if err != nil {
+		return "", err
+	}
+	cfg, err := config.Load(appdata.ConfigPath(base))
+	if err != nil {
+		return "", err
+	}
+	if cfg.DataDir != "" {
+		if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+			return "", fmt.Errorf("create data dir: %w", err)
+		}
+		return cfg.DataDir, nil
+	}
+	return base, nil
+}
+
+func openTracker(log *slog.Logger) (dataDir string, t *tracker.Tracker, database *db.DB, cfg config.Config, err error) {
+	base, err := appdata.EnsureDir()
+	if err != nil {
+		return "", nil, nil, cfg, err
+	}
+	cfg, err = config.Load(appdata.ConfigPath(base))
+	if err != nil {
+		return "", nil, nil, cfg, err
+	}
+	dataDir = base
+	if cfg.DataDir != "" {
+		if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+			return "", nil, nil, cfg, fmt.Errorf("create data dir: %w", err)
+		}
+		dataDir = cfg.DataDir
+	}
+	database, err = db.Open(appdata.DBPath(dataDir))
+	if err != nil {
+		return "", nil, nil, cfg, err
+	}
 	snapshots, err := store.New(dataDir)
+	if err != nil {
+		database.Close()
+		return "", nil, nil, cfg, err
+	}
+	if log == nil {
+		log = slog.Default()
+	}
+	t = tracker.New(database, snapshots, tracker.Options{
+		Debounce:     cfg.Debounce(),
+		MaxFileBytes: cfg.MaxFileBytes,
+		Log:          log,
+	})
+	return dataDir, t, database, cfg, nil
+}
+
+func runForeground(t *tracker.Tracker, printCatchUp bool) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	results, err := t.CatchUp()
 	if err != nil {
 		return err
 	}
-	return fn(tracker.New(database, snapshots, watcher.DefaultDebounce))
+	if printCatchUp {
+		for _, res := range results {
+			if !res.Skipped {
+				fmt.Printf("catch-up version %d: %s\n", res.VersionNum, res.Path)
+			}
+		}
+	}
+
+	files, err := t.List()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("watching %d file(s) (Ctrl+C to stop)\n", len(files))
+	for _, f := range files {
+		mark := ""
+		if f.Missing {
+			mark = " [missing]"
+		}
+		fmt.Printf("  %s%s\n", f.Path, mark)
+	}
+	return t.Run(ctx, func(res tracker.SnapshotResult) {
+		fmt.Printf("version %d: %s\n", res.VersionNum, res.Path)
+	})
+}
+
+func runDaemon() error {
+	logFile, err := openDaemonLog()
+	if err != nil {
+		return err
+	}
+	defer logFile.Close()
+
+	log := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	slog.SetDefault(log)
+
+	dataDir, t, database, _, err := openTracker(log)
+	if err != nil {
+		return err
+	}
+	defer database.Close()
+	defer os.Remove(daemon.PidPath(dataDir))
+
+	if err := daemon.WritePIDFile(dataDir, os.Getpid()); err != nil {
+		return err
+	}
+
+	log.Info("daemon starting", "pid", os.Getpid(), "data_dir", dataDir)
+	results, err := t.CatchUp()
+	if err != nil {
+		return err
+	}
+	for _, res := range results {
+		if !res.Skipped {
+			log.Info("catch-up version", "version", res.VersionNum, "path", res.Path)
+		}
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	err = t.Run(ctx, func(res tracker.SnapshotResult) {
+		log.Info("version recorded", "version", res.VersionNum, "path", res.Path)
+	})
+	log.Info("daemon stopped")
+	return err
+}
+
+func openDaemonLog() (*os.File, error) {
+	dataDir, err := resolveDataDir()
+	if err != nil {
+		return nil, err
+	}
+	return os.OpenFile(appdata.LogPath(dataDir), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 }
 
 func watchFile(path string) error {
