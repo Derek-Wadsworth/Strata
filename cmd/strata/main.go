@@ -13,9 +13,17 @@ import (
 
 	"github.com/Derek-Wadsworth/Strata/internal/appdata"
 	"github.com/Derek-Wadsworth/Strata/internal/db"
+	"github.com/Derek-Wadsworth/Strata/internal/diff"
 	"github.com/Derek-Wadsworth/Strata/internal/store"
 	"github.com/Derek-Wadsworth/Strata/internal/tracker"
 	"github.com/Derek-Wadsworth/Strata/internal/watcher"
+)
+
+const (
+	ansiReset  = "\033[0m"
+	ansiRed    = "\033[31m"
+	ansiGreen  = "\033[32m"
+	ansiYellow = "\033[33m"
 )
 
 const version = "v0.0.1"
@@ -115,15 +123,28 @@ func run(args []string) error {
 				return nil
 			}
 			w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(w, "VERSION\tTIME\tSIZE")
+			fmt.Fprintln(w, "VERSION\tTIME\tSIZE\tCHANGES")
 			for _, e := range entries {
-				fmt.Fprintf(w, "%d\t%s\t%d\n",
+				fmt.Fprintf(w, "%d\t%s\t%d\t%s\n",
 					e.Number,
 					e.CreatedAt.Local().Format(time.RFC3339),
 					e.Size,
+					formatLineStats(e.LinesAdded, e.LinesRemoved),
 				)
 			}
 			return w.Flush()
+		})
+	case "diff":
+		path, fromVer, toVer, statOnly, err := parseDiffArgs(args[1:])
+		if err != nil {
+			return err
+		}
+		return withTracker(func(t *tracker.Tracker) error {
+			res, err := t.Diff(path, fromVer, toVer)
+			if err != nil {
+				return err
+			}
+			return printDiff(res, statOnly)
 		})
 	case "show":
 		if len(args) != 3 {
@@ -188,11 +209,72 @@ func usageText() string {
   strata remove <file>
   strata run
   strata history <file>
+  strata diff <file> [--stat]
+  strata diff <file> <v1> <v2> [--stat]
   strata show <file> <version>
   strata restore <file> <version>
   strata export <file> <version> <dest>
   strata watch <file>
   strata version`
+}
+
+func parseDiffArgs(args []string) (path string, fromVer, toVer int, statOnly bool, err error) {
+	var positional []string
+	for _, a := range args {
+		if a == "--stat" {
+			statOnly = true
+			continue
+		}
+		positional = append(positional, a)
+	}
+	switch len(positional) {
+	case 1:
+		return positional[0], 0, 0, statOnly, nil
+	case 3:
+		fromVer, err = strconv.Atoi(positional[1])
+		if err != nil {
+			return "", 0, 0, false, fmt.Errorf("invalid version %q", positional[1])
+		}
+		toVer, err = strconv.Atoi(positional[2])
+		if err != nil {
+			return "", 0, 0, false, fmt.Errorf("invalid version %q", positional[2])
+		}
+		return positional[0], fromVer, toVer, statOnly, nil
+	default:
+		return "", 0, 0, false, fmt.Errorf("usage: strata diff <file> [<v1> <v2>] [--stat]")
+	}
+}
+
+func printDiff(res tracker.DiffResult, statOnly bool) error {
+	fmt.Printf("--- %s (v%d)\n+++ %s (v%d)\n", res.Path, res.FromVer, res.Path, res.ToVer)
+	if res.Diff.Binary {
+		fmt.Println("binary files differ")
+		return nil
+	}
+	fmt.Printf("%s+%d -%d%s\n", ansiYellow, res.Diff.LinesAdded, res.Diff.LinesRemoved, ansiReset)
+	if statOnly {
+		return nil
+	}
+	for _, hunk := range res.Diff.Hunks {
+		for _, line := range hunk.Lines {
+			switch line.Op {
+			case diff.OpAdd:
+				fmt.Printf("%s+%s%s\n", ansiGreen, line.Text, ansiReset)
+			case diff.OpRemove:
+				fmt.Printf("%s-%s%s\n", ansiRed, line.Text, ansiReset)
+			case diff.OpEqual:
+				fmt.Printf(" %s\n", line.Text)
+			}
+		}
+	}
+	return nil
+}
+
+func formatLineStats(added, removed *int) string {
+	if added == nil || removed == nil {
+		return "-"
+	}
+	return fmt.Sprintf("+%d -%d", *added, *removed)
 }
 
 func withTracker(fn func(*tracker.Tracker) error) error {
