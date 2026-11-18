@@ -65,3 +65,51 @@ func TestOpenMigratesAndRoundTrip(t *testing.T) {
 		t.Fatalf("versions kept after remove = %d, want 1", n)
 	}
 }
+
+func TestListVersionsAndVersionByNumber(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "strata.db")
+	d, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+
+	id, err := d.UpsertActiveFile(`/tmp/demo.txt`, time.Now())
+	if err != nil {
+		t.Fatalf("UpsertActiveFile: %v", err)
+	}
+	hash1 := "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
+	hash2 := "bbccddeeff00112233445566778899aabbccddeeff00112233445566778899aa"
+	if _, err := d.InsertVersion(id, hash1, 1, time.Now()); err != nil {
+		t.Fatalf("InsertVersion 1: %v", err)
+	}
+	if _, err := d.InsertVersion(id, hash2, 2, time.Now()); err != nil {
+		t.Fatalf("InsertVersion 2: %v", err)
+	}
+
+	versions, err := d.ListVersions(id)
+	if err != nil {
+		t.Fatalf("ListVersions: %v", err)
+	}
+	if len(versions) != 2 {
+		t.Fatalf("len = %d, want 2", len(versions))
+	}
+
+	v1, err := d.VersionByNumber(id, 1)
+	if err != nil {
+		t.Fatalf("VersionByNumber 1: %v", err)
+	}
+	if v1.Hash != hash1 {
+		t.Fatalf("v1 hash = %s, want %s", v1.Hash, hash1)
+	}
+	v2, err := d.VersionByNumber(id, 2)
+	if err != nil {
+		t.Fatalf("VersionByNumber 2: %v", err)
+	}
+	if v2.Hash != hash2 {
+		t.Fatalf("v2 hash = %s, want %s", v2.Hash, hash2)
+	}
+	if _, err := d.VersionByNumber(id, 3); err == nil {
+		t.Fatal("VersionByNumber 3: want error")
+	}
+}
