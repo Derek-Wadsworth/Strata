@@ -51,6 +51,8 @@ go run ./cmd/strata add path\to\file.txt
 go run ./cmd/strata list
 go run ./cmd/strata run
 go run ./cmd/strata history path\to\file.txt
+go run ./cmd/strata diff path\to\file.txt
+go run ./cmd/strata diff path\to\file.txt 1 2 --stat
 go run ./cmd/strata show path\to\file.txt 1
 go run ./cmd/strata restore path\to\file.txt 1
 go run ./cmd/strata export path\to\file.txt 1 path\to\copy.txt
@@ -62,7 +64,7 @@ Data lives under `%APPDATA%\Strata` on Windows (or `~/.strata` on macOS/Linux).
 
 ## Status
 
-Milestone 4 complete: history, show, restore, and export. Building milestone by milestone, CLI first, GUI last.
+Milestone 5 complete: structured text diffs, `--stat`, binary detection, and line-change stats on versions. Building milestone by milestone, CLI first, GUI last.
 
 ## License
 
