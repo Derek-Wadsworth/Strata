@@ -197,6 +197,66 @@ func (d *DB) GetActiveFileByPath(path string) (File, error) {
 	return f, nil
 }
 
+// GetFileByPath returns a file by absolute path, active or not.
+func (d *DB) GetFileByPath(path string) (File, error) {
+	row := d.sql.QueryRow(`
+		SELECT id, path, added_at, active
+		FROM files
+		WHERE path = ?`, path)
+	f, err := scanFile(row)
+	if err == sql.ErrNoRows {
+		return File{}, fmt.Errorf("file not known: %s", path)
+	}
+	if err != nil {
+		return File{}, err
+	}
+	return f, nil
+}
+
+// ListVersions returns versions for a file oldest-first (version 1, 2, ...).
+func (d *DB) ListVersions(fileID int64) ([]Version, error) {
+	rows, err := d.sql.Query(`
+		SELECT id, file_id, hash, size, created_at
+		FROM versions
+		WHERE file_id = ?
+		ORDER BY id ASC`, fileID)
+	if err != nil {
+		return nil, fmt.Errorf("list versions: %w", err)
+	}
+	defer rows.Close()
+
+	var out []Version
+	for rows.Next() {
+		v, err := scanVersion(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// VersionByNumber returns the 1-based version for a file (oldest = 1).
+func (d *DB) VersionByNumber(fileID int64, number int) (Version, error) {
+	if number < 1 {
+		return Version{}, fmt.Errorf("version must be >= 1")
+	}
+	row := d.sql.QueryRow(`
+		SELECT id, file_id, hash, size, created_at
+		FROM versions
+		WHERE file_id = ?
+		ORDER BY id ASC
+		LIMIT 1 OFFSET ?`, fileID, number-1)
+	v, err := scanVersion(row)
+	if err == sql.ErrNoRows {
+		return Version{}, fmt.Errorf("version %d not found", number)
+	}
+	if err != nil {
+		return Version{}, err
+	}
+	return v, nil
+}
+
 // InsertVersion appends a version row for a file.
 func (d *DB) InsertVersion(fileID int64, hash string, size int64, createdAt time.Time) (int64, error) {
 	res, err := d.sql.Exec(`
