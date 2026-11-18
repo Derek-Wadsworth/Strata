@@ -18,11 +18,13 @@ type File struct {
 
 // Version is a snapshot metadata row.
 type Version struct {
-	ID        int64
-	FileID    int64
-	Hash      string
-	Size      int64
-	CreatedAt time.Time
+	ID           int64
+	FileID       int64
+	Hash         string
+	Size         int64
+	CreatedAt    time.Time
+	LinesAdded   *int // nil when unknown / binary / first version
+	LinesRemoved *int
 }
 
 // DB wraps the SQLite connection and schema helpers.
@@ -216,7 +218,7 @@ func (d *DB) GetFileByPath(path string) (File, error) {
 // ListVersions returns versions for a file oldest-first (version 1, 2, ...).
 func (d *DB) ListVersions(fileID int64) ([]Version, error) {
 	rows, err := d.sql.Query(`
-		SELECT id, file_id, hash, size, created_at
+		SELECT id, file_id, hash, size, created_at, lines_added, lines_removed
 		FROM versions
 		WHERE file_id = ?
 		ORDER BY id ASC`, fileID)
@@ -242,7 +244,7 @@ func (d *DB) VersionByNumber(fileID int64, number int) (Version, error) {
 		return Version{}, fmt.Errorf("version must be >= 1")
 	}
 	row := d.sql.QueryRow(`
-		SELECT id, file_id, hash, size, created_at
+		SELECT id, file_id, hash, size, created_at, lines_added, lines_removed
 		FROM versions
 		WHERE file_id = ?
 		ORDER BY id ASC
@@ -258,11 +260,13 @@ func (d *DB) VersionByNumber(fileID int64, number int) (Version, error) {
 }
 
 // InsertVersion appends a version row for a file.
-func (d *DB) InsertVersion(fileID int64, hash string, size int64, createdAt time.Time) (int64, error) {
+// linesAdded/linesRemoved may be nil when stats are unknown (first version or binary).
+func (d *DB) InsertVersion(fileID int64, hash string, size int64, createdAt time.Time, linesAdded, linesRemoved *int) (int64, error) {
 	res, err := d.sql.Exec(`
-		INSERT INTO versions(file_id, hash, size, created_at)
-		VALUES (?, ?, ?, ?)`,
+		INSERT INTO versions(file_id, hash, size, created_at, lines_added, lines_removed)
+		VALUES (?, ?, ?, ?, ?, ?)`,
 		fileID, hash, size, createdAt.UTC().Format(time.RFC3339Nano),
+		nullInt(linesAdded), nullInt(linesRemoved),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert version: %w", err)
@@ -274,10 +278,17 @@ func (d *DB) InsertVersion(fileID int64, hash string, size int64, createdAt time
 	return id, nil
 }
 
+func nullInt(v *int) any {
+	if v == nil {
+		return nil
+	}
+	return *v
+}
+
 // LatestVersion returns the newest version for a file, or false if none exist.
 func (d *DB) LatestVersion(fileID int64) (Version, bool, error) {
 	row := d.sql.QueryRow(`
-		SELECT id, file_id, hash, size, created_at
+		SELECT id, file_id, hash, size, created_at, lines_added, lines_removed
 		FROM versions
 		WHERE file_id = ?
 		ORDER BY id DESC
@@ -329,10 +340,12 @@ func scanFile(row rowScanner) (File, error) {
 
 func scanVersion(row rowScanner) (Version, error) {
 	var (
-		v         Version
-		createdAt string
+		v            Version
+		createdAt    string
+		linesAdded   sql.NullInt64
+		linesRemoved sql.NullInt64
 	)
-	if err := row.Scan(&v.ID, &v.FileID, &v.Hash, &v.Size, &createdAt); err != nil {
+	if err := row.Scan(&v.ID, &v.FileID, &v.Hash, &v.Size, &createdAt, &linesAdded, &linesRemoved); err != nil {
 		return Version{}, err
 	}
 	t, err := time.Parse(time.RFC3339Nano, createdAt)
@@ -343,5 +356,13 @@ func scanVersion(row rowScanner) (Version, error) {
 		}
 	}
 	v.CreatedAt = t
+	if linesAdded.Valid {
+		n := int(linesAdded.Int64)
+		v.LinesAdded = &n
+	}
+	if linesRemoved.Valid {
+		n := int(linesRemoved.Int64)
+		v.LinesRemoved = &n
+	}
 	return v, nil
 }
