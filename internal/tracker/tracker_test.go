@@ -67,6 +67,92 @@ func TestAddListRemoveAndSnapshotIfChanged(t *testing.T) {
 	}
 }
 
+func TestHistoryShowRestoreExport(t *testing.T) {
+	tr := newTestTracker(t)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes.txt")
+	if err := os.WriteFile(path, []byte("alpha"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err := tr.Add(path); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("beta"), 0o644); err != nil {
+		t.Fatalf("WriteFile beta: %v", err)
+	}
+	if _, err := tr.SnapshotIfChanged(path); err != nil {
+		t.Fatalf("SnapshotIfChanged: %v", err)
+	}
+
+	hist, err := tr.History(path)
+	if err != nil {
+		t.Fatalf("History: %v", err)
+	}
+	if len(hist) != 2 || hist[0].Number != 1 || hist[1].Number != 2 {
+		t.Fatalf("History = %+v", hist)
+	}
+
+	got, err := tr.Show(path, 1)
+	if err != nil {
+		t.Fatalf("Show: %v", err)
+	}
+	if string(got) != "alpha" {
+		t.Fatalf("Show v1 = %q, want alpha", got)
+	}
+
+	dest := filepath.Join(dir, "export-v1.txt")
+	if err := tr.Export(path, 1, dest); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	exported, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("ReadFile export: %v", err)
+	}
+	if string(exported) != "alpha" {
+		t.Fatalf("export = %q, want alpha", exported)
+	}
+
+	// Unsaved edit on disk; restore should snapshot it first, then write alpha.
+	if err := os.WriteFile(path, []byte("gamma"), 0o644); err != nil {
+		t.Fatalf("WriteFile gamma: %v", err)
+	}
+	res, err := tr.Restore(path, 1)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if !res.CreatedSafetyNet || res.SafetyVersionNum != 3 {
+		t.Fatalf("Restore safety = %+v", res)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile after restore: %v", err)
+	}
+	if string(data) != "alpha" {
+		t.Fatalf("file after restore = %q, want alpha", data)
+	}
+
+	hist, err = tr.History(path)
+	if err != nil {
+		t.Fatalf("History after restore: %v", err)
+	}
+	if len(hist) != 3 {
+		t.Fatalf("expected 3 versions after safety snapshot, got %d", len(hist))
+	}
+
+	// Undo restore by restoring the safety-net version (gamma).
+	if _, err := tr.Restore(path, 3); err != nil {
+		t.Fatalf("Restore safety version: %v", err)
+	}
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile after undo: %v", err)
+	}
+	if string(data) != "gamma" {
+		t.Fatalf("file after undo = %q, want gamma", data)
+	}
+}
+
 func newTestTracker(t *testing.T) *Tracker {
 	t.Helper()
 	root := t.TempDir()
