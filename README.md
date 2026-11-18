@@ -50,6 +50,10 @@ go run ./cmd/strata version
 go run ./cmd/strata add path\to\file.txt
 go run ./cmd/strata list
 go run ./cmd/strata run
+go run ./cmd/strata history path\to\file.txt
+go run ./cmd/strata show path\to\file.txt 1
+go run ./cmd/strata restore path\to\file.txt 1
+go run ./cmd/strata export path\to\file.txt 1 path\to\copy.txt
 go run ./cmd/strata remove path\to\file.txt
 go run ./cmd/strata watch path\to\file.txt
 ```
@@ -58,7 +62,7 @@ Data lives under `%APPDATA%\Strata` on Windows (or `~/.strata` on macOS/Linux).
 
 ## Status
 
-Milestone 3 complete: track files, snapshot on save, list/remove. Building milestone by milestone, CLI first, GUI last.
+Milestone 4 complete: history, show, restore, and export. Building milestone by milestone, CLI first, GUI last.
 
 ## License
 
