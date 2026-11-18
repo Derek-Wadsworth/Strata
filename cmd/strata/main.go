@@ -6,8 +6,10 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"text/tabwriter"
+	"time"
 
 	"github.com/Derek-Wadsworth/Strata/internal/appdata"
 	"github.com/Derek-Wadsworth/Strata/internal/db"
@@ -99,9 +101,98 @@ func run(args []string) error {
 				fmt.Printf("version %d: %s\n", res.VersionNum, res.Path)
 			})
 		})
+	case "history":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: strata history <file>")
+		}
+		return withTracker(func(t *tracker.Tracker) error {
+			entries, err := t.History(args[1])
+			if err != nil {
+				return err
+			}
+			if len(entries) == 0 {
+				fmt.Println("no versions")
+				return nil
+			}
+			w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+			fmt.Fprintln(w, "VERSION\tTIME\tSIZE")
+			for _, e := range entries {
+				fmt.Fprintf(w, "%d\t%s\t%d\n",
+					e.Number,
+					e.CreatedAt.Local().Format(time.RFC3339),
+					e.Size,
+				)
+			}
+			return w.Flush()
+		})
+	case "show":
+		if len(args) != 3 {
+			return fmt.Errorf("usage: strata show <file> <version>")
+		}
+		num, err := strconv.Atoi(args[2])
+		if err != nil {
+			return fmt.Errorf("invalid version %q", args[2])
+		}
+		return withTracker(func(t *tracker.Tracker) error {
+			data, err := t.Show(args[1], num)
+			if err != nil {
+				return err
+			}
+			_, err = os.Stdout.Write(data)
+			return err
+		})
+	case "restore":
+		if len(args) != 3 {
+			return fmt.Errorf("usage: strata restore <file> <version>")
+		}
+		num, err := strconv.Atoi(args[2])
+		if err != nil {
+			return fmt.Errorf("invalid version %q", args[2])
+		}
+		return withTracker(func(t *tracker.Tracker) error {
+			res, err := t.Restore(args[1], num)
+			if err != nil {
+				return err
+			}
+			if res.CreatedSafetyNet {
+				fmt.Printf("saved current content as version %d\n", res.SafetyVersionNum)
+			}
+			fmt.Printf("restored version %d to %s\n", res.RestoredVersion, res.Path)
+			return nil
+		})
+	case "export":
+		if len(args) != 4 {
+			return fmt.Errorf("usage: strata export <file> <version> <dest>")
+		}
+		num, err := strconv.Atoi(args[2])
+		if err != nil {
+			return fmt.Errorf("invalid version %q", args[2])
+		}
+		return withTracker(func(t *tracker.Tracker) error {
+			if err := t.Export(args[1], num, args[3]); err != nil {
+				return err
+			}
+			abs, _ := filepath.Abs(args[3])
+			fmt.Printf("exported version %d to %s\n", num, abs)
+			return nil
+		})
 	default:
-		return fmt.Errorf("unknown command %q\n\nusage:\n  strata add <file>\n  strata list\n  strata remove <file>\n  strata run\n  strata watch <file>\n  strata version", args[0])
+		return fmt.Errorf("unknown command %q\n\n%s", args[0], usageText())
 	}
+}
+
+func usageText() string {
+	return `usage:
+  strata add <file>
+  strata list
+  strata remove <file>
+  strata run
+  strata history <file>
+  strata show <file> <version>
+  strata restore <file> <version>
+  strata export <file> <version> <dest>
+  strata watch <file>
+  strata version`
 }
 
 func withTracker(fn func(*tracker.Tracker) error) error {
