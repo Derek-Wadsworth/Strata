@@ -14,6 +14,7 @@ type File struct {
 	Path    string
 	AddedAt time.Time
 	Active  bool
+	Missing bool
 }
 
 // Version is a snapshot metadata row.
@@ -98,6 +99,12 @@ CREATE TABLE versions (
 CREATE INDEX idx_versions_file_id ON versions(file_id);
 `,
 		},
+		{
+			version: 2,
+			sql: `
+ALTER TABLE files ADD COLUMN missing INTEGER NOT NULL DEFAULT 0;
+`,
+		},
 	}
 
 	for _, m := range migrations {
@@ -126,9 +133,9 @@ CREATE INDEX idx_versions_file_id ON versions(file_id);
 // UpsertActiveFile inserts a file or reactivates an existing row. Returns the file id.
 func (d *DB) UpsertActiveFile(path string, addedAt time.Time) (int64, error) {
 	res, err := d.sql.Exec(`
-		INSERT INTO files(path, added_at, active)
-		VALUES (?, ?, 1)
-		ON CONFLICT(path) DO UPDATE SET active = 1
+		INSERT INTO files(path, added_at, active, missing)
+		VALUES (?, ?, 1, 0)
+		ON CONFLICT(path) DO UPDATE SET active = 1, missing = 0
 	`, path, addedAt.UTC().Format(time.RFC3339Nano))
 	if err != nil {
 		return 0, fmt.Errorf("upsert file: %w", err)
@@ -163,7 +170,7 @@ func (d *DB) DeactivateFile(path string) error {
 // ListActiveFiles returns currently tracked files.
 func (d *DB) ListActiveFiles() ([]File, error) {
 	rows, err := d.sql.Query(`
-		SELECT id, path, added_at, active
+		SELECT id, path, added_at, active, missing
 		FROM files
 		WHERE active = 1
 		ORDER BY path`)
@@ -186,7 +193,7 @@ func (d *DB) ListActiveFiles() ([]File, error) {
 // GetActiveFileByPath returns an active file by absolute path.
 func (d *DB) GetActiveFileByPath(path string) (File, error) {
 	row := d.sql.QueryRow(`
-		SELECT id, path, added_at, active
+		SELECT id, path, added_at, active, missing
 		FROM files
 		WHERE path = ? AND active = 1`, path)
 	f, err := scanFile(row)
@@ -202,7 +209,7 @@ func (d *DB) GetActiveFileByPath(path string) (File, error) {
 // GetFileByPath returns a file by absolute path, active or not.
 func (d *DB) GetFileByPath(path string) (File, error) {
 	row := d.sql.QueryRow(`
-		SELECT id, path, added_at, active
+		SELECT id, path, added_at, active, missing
 		FROM files
 		WHERE path = ?`, path)
 	f, err := scanFile(row)
@@ -313,6 +320,26 @@ func (d *DB) CountVersions(fileID int64) (int, error) {
 	return n, nil
 }
 
+// SetMissing marks whether a tracked file is currently missing on disk.
+func (d *DB) SetMissing(path string, missing bool) error {
+	flag := 0
+	if missing {
+		flag = 1
+	}
+	res, err := d.sql.Exec(`UPDATE files SET missing = ? WHERE path = ? AND active = 1`, flag, path)
+	if err != nil {
+		return fmt.Errorf("set missing: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("file not tracked: %s", path)
+	}
+	return nil
+}
+
 type rowScanner interface {
 	Scan(dest ...any) error
 }
@@ -322,8 +349,9 @@ func scanFile(row rowScanner) (File, error) {
 		f       File
 		addedAt string
 		active  int
+		missing int
 	)
-	if err := row.Scan(&f.ID, &f.Path, &addedAt, &active); err != nil {
+	if err := row.Scan(&f.ID, &f.Path, &addedAt, &active, &missing); err != nil {
 		return File{}, err
 	}
 	t, err := time.Parse(time.RFC3339Nano, addedAt)
@@ -335,6 +363,7 @@ func scanFile(row rowScanner) (File, error) {
 	}
 	f.AddedAt = t
 	f.Active = active != 0
+	f.Missing = missing != 0
 	return f, nil
 }
 
