@@ -153,6 +153,52 @@ func TestHistoryShowRestoreExport(t *testing.T) {
 	}
 }
 
+func TestDiffLatestAndExplicit(t *testing.T) {
+	tr := newTestTracker(t)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes.txt")
+
+	if err := os.WriteFile(path, []byte("one\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err := tr.Add(path); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := os.WriteFile(path, []byte("one\ntwo\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile 2: %v", err)
+	}
+	if _, err := tr.SnapshotIfChanged(path); err != nil {
+		t.Fatalf("SnapshotIfChanged: %v", err)
+	}
+
+	res, err := tr.Diff(path, 0, 0)
+	if err != nil {
+		t.Fatalf("Diff latest: %v", err)
+	}
+	if res.FromVer != 1 || res.ToVer != 2 {
+		t.Fatalf("versions = %d..%d", res.FromVer, res.ToVer)
+	}
+	if res.Diff.Binary || res.Diff.LinesAdded != 1 || res.Diff.LinesRemoved != 0 {
+		t.Fatalf("diff = %+v", res.Diff)
+	}
+
+	hist, err := tr.History(path)
+	if err != nil {
+		t.Fatalf("History: %v", err)
+	}
+	if hist[1].LinesAdded == nil || *hist[1].LinesAdded != 1 {
+		t.Fatalf("version 2 line stats = %+v", hist[1])
+	}
+
+	res, err = tr.Diff(path, 1, 2)
+	if err != nil {
+		t.Fatalf("Diff explicit: %v", err)
+	}
+	if res.Diff.LinesAdded != 1 {
+		t.Fatalf("explicit diff stats = %+v", res.Diff)
+	}
+}
+
 func newTestTracker(t *testing.T) *Tracker {
 	t.Helper()
 	root := t.TempDir()
