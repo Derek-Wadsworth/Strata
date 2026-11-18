@@ -41,3 +41,13 @@ func EnsureDir() (string, error) {
 func DBPath(dataDir string) string {
 	return filepath.Join(dataDir, "strata.db")
 }
+
+// ConfigPath is the JSON config path inside the data directory.
+func ConfigPath(dataDir string) string {
+	return filepath.Join(dataDir, "config.json")
+}
+
+// LogPath is the daemon log file path inside the data directory.
+func LogPath(dataDir string) string {
+	return filepath.Join(dataDir, "strata.log")
+}
