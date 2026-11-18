@@ -50,6 +50,9 @@ go run ./cmd/strata version
 go run ./cmd/strata add path\to\file.txt
 go run ./cmd/strata list
 go run ./cmd/strata run
+go run ./cmd/strata start
+go run ./cmd/strata status
+go run ./cmd/strata stop
 go run ./cmd/strata history path\to\file.txt
 go run ./cmd/strata diff path\to\file.txt
 go run ./cmd/strata diff path\to\file.txt 1 2 --stat
@@ -60,11 +63,11 @@ go run ./cmd/strata remove path\to\file.txt
 go run ./cmd/strata watch path\to\file.txt
 ```
 
-Data lives under `%APPDATA%\Strata` on Windows (or `~/.strata` on macOS/Linux).
+Data lives under `%APPDATA%\Strata` on Windows (or `~/.strata` on macOS/Linux): `strata.db`, `objects/`, `config.json`, `strata.pid`, `strata.log`.
 
 ## Status
 
-Milestone 5 complete: structured text diffs, `--stat`, binary detection, and line-change stats on versions. Building milestone by milestone, CLI first, GUI last.
+Milestone 6 complete: background daemon (`start`/`stop`/`status`), catch-up on startup, size limits, missing-file handling, and config/logging. Building milestone by milestone, CLI first, GUI last.
 
 ## License
 
