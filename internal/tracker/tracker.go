@@ -2,7 +2,9 @@ package tracker
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -14,19 +16,43 @@ import (
 	"github.com/Derek-Wadsworth/Strata/internal/watcher"
 )
 
+// Sentinel errors for snapshot handling.
+var (
+	ErrMissing  = errors.New("tracked file is missing")
+	ErrTooLarge = errors.New("file exceeds configured size limit")
+)
+
+// Options configures tracker behavior.
+type Options struct {
+	Debounce     time.Duration
+	MaxFileBytes int64 // 0 means no limit
+	Log          *slog.Logger
+}
+
 // Tracker ties the database, snapshot store, and file watcher together.
 type Tracker struct {
-	db       *db.DB
-	store    *store.Store
-	debounce time.Duration
+	db           *db.DB
+	store        *store.Store
+	debounce     time.Duration
+	maxFileBytes int64
+	log          *slog.Logger
 }
 
 // New creates a Tracker. The caller owns db lifetime (Close).
-func New(database *db.DB, snapshots *store.Store, debounce time.Duration) *Tracker {
-	if debounce <= 0 {
-		debounce = watcher.DefaultDebounce
+func New(database *db.DB, snapshots *store.Store, opts Options) *Tracker {
+	if opts.Debounce <= 0 {
+		opts.Debounce = watcher.DefaultDebounce
 	}
-	return &Tracker{db: database, store: snapshots, debounce: debounce}
+	if opts.Log == nil {
+		opts.Log = slog.Default()
+	}
+	return &Tracker{
+		db:           database,
+		store:        snapshots,
+		debounce:     opts.Debounce,
+		maxFileBytes: opts.MaxFileBytes,
+		log:          opts.Log,
+	}
 }
 
 // ListedFile is a tracked file with a version count for display.
@@ -34,6 +60,7 @@ type ListedFile struct {
 	Path         string
 	VersionCount int
 	AddedAt      time.Time
+	Missing      bool
 }
 
 // Add registers path, snapshots it immediately as a new version, and returns
@@ -47,6 +74,9 @@ func (t *Tracker) Add(path string) (versionNum int, err error) {
 	info, err := os.Stat(abs)
 	if err != nil {
 		return 0, fmt.Errorf("stat file: %w", err)
+	}
+	if err := t.checkSize(info.Size()); err != nil {
+		return 0, err
 	}
 
 	fileID, err := t.db.UpsertActiveFile(abs, time.Now())
@@ -87,6 +117,7 @@ func (t *Tracker) List() ([]ListedFile, error) {
 			Path:         f.Path,
 			VersionCount: n,
 			AddedAt:      f.AddedAt,
+			Missing:      f.Missing,
 		})
 	}
 	return out, nil
@@ -107,6 +138,8 @@ type SnapshotResult struct {
 	Hash       string
 	VersionNum int
 	Skipped    bool
+	TooLarge   bool
+	Missing    bool
 }
 
 // SnapshotIfChanged stores a new version when content differs from the latest.
@@ -123,12 +156,27 @@ func (t *Tracker) SnapshotIfChanged(path string) (SnapshotResult, error) {
 
 	info, err := os.Stat(abs)
 	if err != nil {
+		if os.IsNotExist(err) {
+			_ = t.db.SetMissing(abs, true)
+			return SnapshotResult{Path: abs, Missing: true, Skipped: true}, fmt.Errorf("%w: %s", ErrMissing, abs)
+		}
 		return SnapshotResult{}, fmt.Errorf("stat file: %w", err)
+	}
+	if info.IsDir() {
+		return SnapshotResult{}, fmt.Errorf("path is a directory: %s", abs)
+	}
+	if err := t.checkSize(info.Size()); err != nil {
+		t.log.Warn("skipping oversized file", "path", abs, "size", info.Size(), "limit", t.maxFileBytes)
+		return SnapshotResult{Path: abs, TooLarge: true, Skipped: true}, err
 	}
 
 	hash, err := t.store.Save(abs)
 	if err != nil {
 		return SnapshotResult{}, fmt.Errorf("snapshot: %w", err)
+	}
+
+	if f.Missing {
+		_ = t.db.SetMissing(abs, false)
 	}
 
 	latest, ok, err := t.db.LatestVersion(f.ID)
@@ -157,6 +205,32 @@ func (t *Tracker) SnapshotIfChanged(path string) (SnapshotResult, error) {
 	return SnapshotResult{Path: abs, Hash: hash, VersionNum: n, Skipped: false}, nil
 }
 
+// CatchUp compares each active file to its latest version and records changes
+// that happened while Strata was not running.
+func (t *Tracker) CatchUp() ([]SnapshotResult, error) {
+	files, err := t.db.ListActiveFiles()
+	if err != nil {
+		return nil, err
+	}
+	var out []SnapshotResult
+	for _, f := range files {
+		res, err := t.SnapshotIfChanged(f.Path)
+		if err != nil {
+			if errors.Is(err, ErrMissing) || errors.Is(err, ErrTooLarge) {
+				t.log.Info("catch-up skipped", "path", f.Path, "err", err)
+				out = append(out, res)
+				continue
+			}
+			return out, err
+		}
+		if !res.Skipped {
+			t.log.Info("catch-up recorded version", "path", res.Path, "version", res.VersionNum)
+		}
+		out = append(out, res)
+	}
+	return out, nil
+}
+
 // Run watches all active files until ctx is cancelled.
 // onVersion is called when a new version is recorded (not when skipped).
 func (t *Tracker) Run(ctx context.Context, onVersion func(SnapshotResult)) error {
@@ -175,16 +249,23 @@ func (t *Tracker) Run(ctx context.Context, onVersion func(SnapshotResult)) error
 	defer cancel()
 
 	var wg sync.WaitGroup
-	errCh := make(chan error, len(files))
-
 	for _, f := range files {
 		wg.Add(1)
 		go func(path string) {
 			defer wg.Done()
+			// Parent dir may be missing; retry is out of scope — mark missing and exit this watch.
+			if _, err := os.Stat(filepath.Dir(path)); err != nil {
+				t.log.Warn("parent directory unavailable", "path", path, "err", err)
+				_ = t.db.SetMissing(path, true)
+				return
+			}
 			err := watcher.Watch(ctx, path, t.debounce, func(changed string) {
 				res, err := t.SnapshotIfChanged(changed)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "strata: snapshot %s: %v\n", changed, err)
+					if errors.Is(err, ErrMissing) || errors.Is(err, ErrTooLarge) {
+						return
+					}
+					t.log.Error("snapshot failed", "path", changed, "err", err)
 					return
 				}
 				if !res.Skipped {
@@ -192,8 +273,8 @@ func (t *Tracker) Run(ctx context.Context, onVersion func(SnapshotResult)) error
 				}
 			})
 			if err != nil && ctx.Err() == nil {
-				errCh <- err
-				cancel()
+				t.log.Warn("watcher stopped", "path", path, "err", err)
+				_ = t.db.SetMissing(path, true)
 			}
 		}(f.Path)
 	}
@@ -205,17 +286,19 @@ func (t *Tracker) Run(ctx context.Context, onVersion func(SnapshotResult)) error
 	}()
 
 	select {
-	case <-done:
-		select {
-		case err := <-errCh:
-			return err
-		default:
-			return nil
-		}
-	case err := <-errCh:
+	case <-ctx.Done():
 		<-done
-		return err
+		return nil
+	case <-done:
+		return nil
 	}
+}
+
+func (t *Tracker) checkSize(size int64) error {
+	if t.maxFileBytes > 0 && size > t.maxFileBytes {
+		return fmt.Errorf("%w (%d > %d)", ErrTooLarge, size, t.maxFileBytes)
+	}
+	return nil
 }
 
 // HistoryEntry is one version in a file's timeline.
