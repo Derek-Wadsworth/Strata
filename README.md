@@ -67,7 +67,7 @@ Data lives under `%APPDATA%\Strata` on Windows (or `~/.strata` on macOS/Linux): 
 
 ## Status
 
-Milestone 6 complete: background daemon (`start`/`stop`/`status`), catch-up on startup, size limits, missing-file handling, and config/logging. Building milestone by milestone, CLI first, GUI last.
+Milestone 7 complete: core `api.Client` facade, version-created event subscription, CLI uses only the core API. Ready for a GUI layer.
 
 ## License
 
