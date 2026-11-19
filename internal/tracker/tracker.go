@@ -36,6 +36,9 @@ type Tracker struct {
 	debounce     time.Duration
 	maxFileBytes int64
 	log          *slog.Logger
+
+	mu   sync.Mutex
+	subs map[chan Event]struct{}
 }
 
 // New creates a Tracker. The caller owns db lifetime (Close).
@@ -52,6 +55,7 @@ func New(database *db.DB, snapshots *store.Store, opts Options) *Tracker {
 		debounce:     opts.Debounce,
 		maxFileBytes: opts.MaxFileBytes,
 		log:          opts.Log,
+		subs:         make(map[chan Event]struct{}),
 	}
 }
 
@@ -98,6 +102,7 @@ func (t *Tracker) Add(path string) (versionNum int, err error) {
 	if err != nil {
 		return 0, err
 	}
+	t.emitVersionCreated(abs, n)
 	return n, nil
 }
 
@@ -202,7 +207,9 @@ func (t *Tracker) SnapshotIfChanged(path string) (SnapshotResult, error) {
 	if err != nil {
 		return SnapshotResult{}, err
 	}
-	return SnapshotResult{Path: abs, Hash: hash, VersionNum: n, Skipped: false}, nil
+	res := SnapshotResult{Path: abs, Hash: hash, VersionNum: n, Skipped: false}
+	t.emitVersionCreated(abs, n)
+	return res, nil
 }
 
 // CatchUp compares each active file to its latest version and records changes
