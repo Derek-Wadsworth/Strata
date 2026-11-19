@@ -6,20 +6,14 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"syscall"
 	"text/tabwriter"
 	"time"
 
-	"github.com/Derek-Wadsworth/Strata/internal/appdata"
-	"github.com/Derek-Wadsworth/Strata/internal/config"
-	"github.com/Derek-Wadsworth/Strata/internal/daemon"
-	"github.com/Derek-Wadsworth/Strata/internal/db"
+	"github.com/Derek-Wadsworth/Strata/internal/api"
 	"github.com/Derek-Wadsworth/Strata/internal/diff"
-	"github.com/Derek-Wadsworth/Strata/internal/store"
 	"github.com/Derek-Wadsworth/Strata/internal/tracker"
-	"github.com/Derek-Wadsworth/Strata/internal/watcher"
 )
 
 const (
@@ -52,23 +46,30 @@ func run(args []string) error {
 		if len(args) != 2 {
 			return fmt.Errorf("usage: strata watch <file>")
 		}
-		return watchFile(args[1])
+		return withClient(nil, func(c *api.Client) error {
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			fmt.Printf("watching %s (Ctrl+C to stop)\n", args[1])
+			return c.WatchFile(ctx, args[1], func(changed string) {
+				fmt.Printf("saved: %s\n", changed)
+			})
+		})
 	case "add":
 		if len(args) != 2 {
 			return fmt.Errorf("usage: strata add <file>")
 		}
-		return withTracker(func(t *tracker.Tracker) error {
-			n, err := t.Add(args[1])
+		return withClient(nil, func(c *api.Client) error {
+			n, err := c.Add(args[1])
 			if err != nil {
 				return err
 			}
-			abs, _ := filepath.Abs(args[1])
+			abs, _ := c.AbsPath(args[1])
 			fmt.Printf("tracking %s (version %d)\n", abs, n)
 			return nil
 		})
 	case "list":
-		return withTracker(func(t *tracker.Tracker) error {
-			files, err := t.List()
+		return withClient(nil, func(c *api.Client) error {
+			files, err := c.List()
 			if err != nil {
 				return err
 			}
@@ -91,64 +92,57 @@ func run(args []string) error {
 		if len(args) != 2 {
 			return fmt.Errorf("usage: strata remove <file>")
 		}
-		return withTracker(func(t *tracker.Tracker) error {
-			if err := t.Remove(args[1]); err != nil {
+		return withClient(nil, func(c *api.Client) error {
+			if err := c.Remove(args[1]); err != nil {
 				return err
 			}
-			abs, _ := filepath.Abs(args[1])
+			abs, _ := c.AbsPath(args[1])
 			fmt.Printf("stopped tracking %s (history kept)\n", abs)
 			return nil
 		})
 	case "run":
-		return withTracker(func(t *tracker.Tracker) error {
-			return runForeground(t, true)
+		return withClient(nil, func(c *api.Client) error {
+			return runForeground(c, true)
 		})
 	case "start":
-		dataDir, err := resolveDataDir()
-		if err != nil {
-			return err
-		}
-		st, err := daemon.Start(dataDir)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("daemon started (pid %d)\n", st.PID)
-		fmt.Printf("log: %s\n", appdata.LogPath(dataDir))
-		return nil
+		return withClient(nil, func(c *api.Client) error {
+			st, err := c.StartDaemon()
+			if err != nil {
+				return err
+			}
+			fmt.Printf("daemon started (pid %d)\n", st.PID)
+			fmt.Printf("log: %s\n", c.LogPath())
+			return nil
+		})
 	case "stop":
-		dataDir, err := resolveDataDir()
-		if err != nil {
-			return err
-		}
-		if err := daemon.Stop(dataDir); err != nil {
-			return err
-		}
-		fmt.Println("daemon stopped")
-		return nil
+		return withClient(nil, func(c *api.Client) error {
+			if err := c.StopDaemon(); err != nil {
+				return err
+			}
+			fmt.Println("daemon stopped")
+			return nil
+		})
 	case "status":
-		dataDir, err := resolveDataDir()
-		if err != nil {
-			return err
-		}
-		st, err := daemon.ReadStatus(dataDir)
-		if err != nil {
-			return err
-		}
-		if st.Running {
-			fmt.Printf("running (pid %d)\n", st.PID)
-		} else {
-			fmt.Println("not running")
-		}
-		return nil
+		return withClient(nil, func(c *api.Client) error {
+			st, err := c.DaemonStatus()
+			if err != nil {
+				return err
+			}
+			if st.Running {
+				fmt.Printf("running (pid %d)\n", st.PID)
+			} else {
+				fmt.Println("not running")
+			}
+			return nil
+		})
 	case "daemon":
-		// Internal entrypoint used by `strata start`.
 		return runDaemon()
 	case "history":
 		if len(args) != 2 {
 			return fmt.Errorf("usage: strata history <file>")
 		}
-		return withTracker(func(t *tracker.Tracker) error {
-			entries, err := t.History(args[1])
+		return withClient(nil, func(c *api.Client) error {
+			entries, err := c.History(args[1])
 			if err != nil {
 				return err
 			}
@@ -173,8 +167,8 @@ func run(args []string) error {
 		if err != nil {
 			return err
 		}
-		return withTracker(func(t *tracker.Tracker) error {
-			res, err := t.Diff(path, fromVer, toVer)
+		return withClient(nil, func(c *api.Client) error {
+			res, err := c.Diff(path, fromVer, toVer)
 			if err != nil {
 				return err
 			}
@@ -188,8 +182,8 @@ func run(args []string) error {
 		if err != nil {
 			return fmt.Errorf("invalid version %q", args[2])
 		}
-		return withTracker(func(t *tracker.Tracker) error {
-			data, err := t.Show(args[1], num)
+		return withClient(nil, func(c *api.Client) error {
+			data, err := c.Show(args[1], num)
 			if err != nil {
 				return err
 			}
@@ -204,8 +198,8 @@ func run(args []string) error {
 		if err != nil {
 			return fmt.Errorf("invalid version %q", args[2])
 		}
-		return withTracker(func(t *tracker.Tracker) error {
-			res, err := t.Restore(args[1], num)
+		return withClient(nil, func(c *api.Client) error {
+			res, err := c.Restore(args[1], num)
 			if err != nil {
 				return err
 			}
@@ -223,11 +217,11 @@ func run(args []string) error {
 		if err != nil {
 			return fmt.Errorf("invalid version %q", args[2])
 		}
-		return withTracker(func(t *tracker.Tracker) error {
-			if err := t.Export(args[1], num, args[3]); err != nil {
+		return withClient(nil, func(c *api.Client) error {
+			if err := c.Export(args[1], num, args[3]); err != nil {
 				return err
 			}
-			abs, _ := filepath.Abs(args[3])
+			abs, _ := c.AbsPath(args[3])
 			fmt.Printf("exported version %d to %s\n", num, abs)
 			return nil
 		})
@@ -314,74 +308,20 @@ func formatLineStats(added, removed *int) string {
 	return fmt.Sprintf("+%d -%d", *added, *removed)
 }
 
-func withTracker(fn func(*tracker.Tracker) error) error {
-	_, t, database, _, err := openTracker(nil)
+func withClient(log *slog.Logger, fn func(*api.Client) error) error {
+	c, err := api.Open(log)
 	if err != nil {
 		return err
 	}
-	defer database.Close()
-	return fn(t)
+	defer c.Close()
+	return fn(c)
 }
 
-func resolveDataDir() (string, error) {
-	base, err := appdata.EnsureDir()
-	if err != nil {
-		return "", err
-	}
-	cfg, err := config.Load(appdata.ConfigPath(base))
-	if err != nil {
-		return "", err
-	}
-	if cfg.DataDir != "" {
-		if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
-			return "", fmt.Errorf("create data dir: %w", err)
-		}
-		return cfg.DataDir, nil
-	}
-	return base, nil
-}
-
-func openTracker(log *slog.Logger) (dataDir string, t *tracker.Tracker, database *db.DB, cfg config.Config, err error) {
-	base, err := appdata.EnsureDir()
-	if err != nil {
-		return "", nil, nil, cfg, err
-	}
-	cfg, err = config.Load(appdata.ConfigPath(base))
-	if err != nil {
-		return "", nil, nil, cfg, err
-	}
-	dataDir = base
-	if cfg.DataDir != "" {
-		if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
-			return "", nil, nil, cfg, fmt.Errorf("create data dir: %w", err)
-		}
-		dataDir = cfg.DataDir
-	}
-	database, err = db.Open(appdata.DBPath(dataDir))
-	if err != nil {
-		return "", nil, nil, cfg, err
-	}
-	snapshots, err := store.New(dataDir)
-	if err != nil {
-		database.Close()
-		return "", nil, nil, cfg, err
-	}
-	if log == nil {
-		log = slog.Default()
-	}
-	t = tracker.New(database, snapshots, tracker.Options{
-		Debounce:     cfg.Debounce(),
-		MaxFileBytes: cfg.MaxFileBytes,
-		Log:          log,
-	})
-	return dataDir, t, database, cfg, nil
-}
-
-func runForeground(t *tracker.Tracker, printCatchUp bool) error {
+func runForeground(c *api.Client, printCatchUp bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	results, err := t.CatchUp()
+	results, err := c.CatchUp()
 	if err != nil {
 		return err
 	}
@@ -393,7 +333,7 @@ func runForeground(t *tracker.Tracker, printCatchUp bool) error {
 		}
 	}
 
-	files, err := t.List()
+	files, err := c.List()
 	if err != nil {
 		return err
 	}
@@ -405,7 +345,7 @@ func runForeground(t *tracker.Tracker, printCatchUp bool) error {
 		}
 		fmt.Printf("  %s%s\n", f.Path, mark)
 	}
-	return t.Run(ctx, func(res tracker.SnapshotResult) {
+	return c.Run(ctx, func(res tracker.SnapshotResult) {
 		fmt.Printf("version %d: %s\n", res.VersionNum, res.Path)
 	})
 }
@@ -420,19 +360,19 @@ func runDaemon() error {
 	log := slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(log)
 
-	dataDir, t, database, _, err := openTracker(log)
+	c, err := api.Open(log)
 	if err != nil {
 		return err
 	}
-	defer database.Close()
-	defer os.Remove(daemon.PidPath(dataDir))
+	defer c.Close()
+	defer os.Remove(c.PidPath())
 
-	if err := daemon.WritePIDFile(dataDir, os.Getpid()); err != nil {
+	if err := c.WriteDaemonPID(os.Getpid()); err != nil {
 		return err
 	}
 
-	log.Info("daemon starting", "pid", os.Getpid(), "data_dir", dataDir)
-	results, err := t.CatchUp()
+	log.Info("daemon starting", "pid", os.Getpid(), "data_dir", c.DataDir())
+	results, err := c.CatchUp()
 	if err != nil {
 		return err
 	}
@@ -444,7 +384,7 @@ func runDaemon() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	err = t.Run(ctx, func(res tracker.SnapshotResult) {
+	err = c.Run(ctx, func(res tracker.SnapshotResult) {
 		log.Info("version recorded", "version", res.VersionNum, "path", res.Path)
 	})
 	log.Info("daemon stopped")
@@ -452,19 +392,11 @@ func runDaemon() error {
 }
 
 func openDaemonLog() (*os.File, error) {
-	dataDir, err := resolveDataDir()
+	c, err := api.Open(nil)
 	if err != nil {
 		return nil, err
 	}
-	return os.OpenFile(appdata.LogPath(dataDir), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-}
-
-func watchFile(path string) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	fmt.Printf("watching %s (Ctrl+C to stop)\n", path)
-	return watcher.Watch(ctx, path, watcher.DefaultDebounce, func(changed string) {
-		fmt.Printf("saved: %s\n", changed)
-	})
+	path := c.LogPath()
+	_ = c.Close()
+	return os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 }
