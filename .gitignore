@@ -1,11 +1,19 @@
 # Binaries
 /strata
 /strata.exe
+/strata-gui
+/strata-gui.exe
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
+build/bin/
+bin/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
 
 # Test / coverage
 *.test
