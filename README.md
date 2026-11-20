@@ -45,6 +45,8 @@ The core library knows nothing about the CLI or GUI. Both frontends call the sam
 
 ## Quick start
 
+### CLI
+
 ```bash
 go run ./cmd/strata version
 go run ./cmd/strata add path\to\file.txt
@@ -63,11 +65,21 @@ go run ./cmd/strata remove path\to\file.txt
 go run ./cmd/strata watch path\to\file.txt
 ```
 
+### Desktop GUI (Wails)
+
+```bash
+# from repo root
+wails dev          # development
+wails build        # produces build/bin/strata-gui.exe
+```
+
+The GUI uses the same `api.Client` as the CLI: sidebar of tracked files, version timeline, content view, restore, and live refresh on new versions. While the window is open it runs its own watcher (stop the daemon first if you use `strata start`).
+
 Data lives under `%APPDATA%\Strata` on Windows (or `~/.strata` on macOS/Linux): `strata.db`, `objects/`, `config.json`, `strata.pid`, `strata.log`.
 
 ## Status
 
-Milestone 7 complete: core `api.Client` facade, version-created event subscription, CLI uses only the core API. Ready for a GUI layer.
+Milestone 8 complete: Wails desktop shell with file browser, version timeline, content view, restore, and live updates.
 
 ## License
 
