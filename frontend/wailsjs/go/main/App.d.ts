@@ -4,6 +4,8 @@ import {main} from '../models';
 
 export function AddFile():Promise<main.FileInfo>;
 
+export function DiffVersions(arg1:string,arg2:number,arg3:number):Promise<main.DiffInfo>;
+
 export function History(arg1:string):Promise<Array<main.VersionInfo>>;
 
 export function ListFiles():Promise<Array<main.FileInfo>>;

@@ -6,6 +6,10 @@ export function AddFile() {
   return window['go']['main']['App']['AddFile']();
 }
 
+export function DiffVersions(arg1, arg2, arg3) {
+  return window['go']['main']['App']['DiffVersions'](arg1, arg2, arg3);
+}
+
 export function History(arg1) {
   return window['go']['main']['App']['History'](arg1);
 }
