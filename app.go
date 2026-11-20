@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Derek-Wadsworth/Strata/internal/api"
+	"github.com/Derek-Wadsworth/Strata/internal/diff"
 	"github.com/Derek-Wadsworth/Strata/internal/tracker"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -194,4 +195,75 @@ func (a *App) RestoreVersion(path string, version int) (RestoreInfo, error) {
 		CreatedSafetyNet: res.CreatedSafetyNet,
 		SafetyVersionNum: res.SafetyVersionNum,
 	}, nil
+}
+
+// DiffLineInfo is one line in a GUI diff view.
+type DiffLineInfo struct {
+	Op    string `json:"op"` // equal | add | remove
+	Text  string `json:"text"`
+	OldNo int    `json:"oldNo"`
+	NewNo int    `json:"newNo"`
+}
+
+// DiffInfo is a structured diff for the frontend.
+type DiffInfo struct {
+	Path         string         `json:"path"`
+	FromVer      int            `json:"fromVer"`
+	ToVer        int            `json:"toVer"`
+	Binary       bool           `json:"binary"`
+	LinesAdded   int            `json:"linesAdded"`
+	LinesRemoved int            `json:"linesRemoved"`
+	Lines        []DiffLineInfo `json:"lines"`
+}
+
+// DiffVersions compares two versions of a file.
+// If fromVer is 0, compares toVer against the previous version (toVer-1).
+func (a *App) DiffVersions(path string, fromVer, toVer int) (DiffInfo, error) {
+	if a.client == nil {
+		return DiffInfo{}, fmt.Errorf("app not ready")
+	}
+	if toVer < 1 {
+		return DiffInfo{}, fmt.Errorf("to version must be >= 1")
+	}
+	if fromVer == 0 {
+		if toVer == 1 {
+			return DiffInfo{Path: path, FromVer: 0, ToVer: 1, Lines: []DiffLineInfo{}}, nil
+		}
+		fromVer = toVer - 1
+	}
+	res, err := a.client.Diff(path, fromVer, toVer)
+	if err != nil {
+		return DiffInfo{}, err
+	}
+	out := DiffInfo{
+		Path:         res.Path,
+		FromVer:      res.FromVer,
+		ToVer:        res.ToVer,
+		Binary:       res.Diff.Binary,
+		LinesAdded:   res.Diff.LinesAdded,
+		LinesRemoved: res.Diff.LinesRemoved,
+		Lines:        make([]DiffLineInfo, 0),
+	}
+	for _, hunk := range res.Diff.Hunks {
+		for _, line := range hunk.Lines {
+			out.Lines = append(out.Lines, DiffLineInfo{
+				Op:    opName(line.Op),
+				Text:  line.Text,
+				OldNo: line.OldNo,
+				NewNo: line.NewNo,
+			})
+		}
+	}
+	return out, nil
+}
+
+func opName(op diff.Op) string {
+	switch op {
+	case diff.OpAdd:
+		return "add"
+	case diff.OpRemove:
+		return "remove"
+	default:
+		return "equal"
+	}
 }
