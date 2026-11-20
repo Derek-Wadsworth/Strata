@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Strata</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside class="sidebar">
+        <header class="brand">
+          <h1>Strata</h1>
+          <p>Local version history</p>
+        </header>
+        <div class="sidebar-actions">
+          <button id="add-btn" type="button">Add file</button>
+          <button id="remove-btn" type="button" class="ghost" disabled>Remove</button>
+        </div>
+        <ul id="file-list" class="file-list"></ul>
+      </aside>
+
+      <main class="main">
+        <section class="empty" id="empty-state">
+          <h2>Select a tracked file</h2>
+          <p>Add a file to begin browsing versions and restoring older saves.</p>
+        </section>
+
+        <section class="workspace hidden" id="workspace">
+          <header class="workspace-header">
+            <div>
+              <p class="eyebrow">Tracked file</p>
+              <h2 id="selected-path"></h2>
+            </div>
+          </header>
+
+          <div class="workspace-grid">
+            <div class="timeline-panel">
+              <h3>Versions</h3>
+              <ul id="version-list" class="version-list"></ul>
+            </div>
+            <div class="content-panel">
+              <div class="content-toolbar">
+                <h3 id="content-title">Content</h3>
+                <button id="restore-btn" type="button" class="ghost" disabled>Restore</button>
+              </div>
+              <pre id="content-view" class="content-view">Select a version to view its contents.</pre>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <div id="toast" class="toast hidden" role="status"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
