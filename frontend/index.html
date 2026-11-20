@@ -29,7 +29,7 @@
       <main class="main">
         <section class="empty" id="empty-state">
           <h2>Select a tracked file</h2>
-          <p>Add a file to begin browsing versions and restoring older saves.</p>
+          <p>Add a file to begin browsing versions, diffs, and restores.</p>
         </section>
 
         <section class="workspace hidden" id="workspace">
@@ -47,10 +47,35 @@
             </div>
             <div class="content-panel">
               <div class="content-toolbar">
-                <h3 id="content-title">Content</h3>
+                <div class="view-tabs" role="tablist">
+                  <button type="button" class="tab active" data-view="diff" id="tab-diff">Diff</button>
+                  <button type="button" class="tab" data-view="content" id="tab-content">Content</button>
+                </div>
                 <button id="restore-btn" type="button" class="ghost" disabled>Restore</button>
               </div>
-              <pre id="content-view" class="content-view">Select a version to view its contents.</pre>
+
+              <div id="diff-controls" class="diff-controls">
+                <label>
+                  From
+                  <select id="from-ver"></select>
+                </label>
+                <label>
+                  To
+                  <select id="to-ver"></select>
+                </label>
+                <div class="mode-tabs">
+                  <button type="button" class="tab active" data-mode="inline" id="mode-inline">Inline</button>
+                  <button type="button" class="tab" data-mode="side" id="mode-side">Side by side</button>
+                </div>
+                <div class="nav-btns">
+                  <button type="button" class="ghost" id="prev-change" disabled>Prev change</button>
+                  <button type="button" class="ghost" id="next-change" disabled>Next change</button>
+                </div>
+                <p id="diff-stat" class="diff-stat"></p>
+              </div>
+
+              <div id="diff-view" class="diff-view"></div>
+              <pre id="content-view" class="content-view hidden">Select a version to view its contents.</pre>
             </div>
           </div>
         </section>
