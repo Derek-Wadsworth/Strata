@@ -79,7 +79,7 @@ Data lives under `%APPDATA%\Strata` on Windows (or `~/.strata` on macOS/Linux): 
 
 ## Status
 
-Milestone 8 complete: Wails desktop shell with file browser, version timeline, content view, restore, and live updates.
+Milestone 9 complete: visual diffs in the GUI (inline and side-by-side), compare any two versions, change navigation, and binary-safe handling.
 
 ## License
 
