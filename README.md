@@ -73,7 +73,9 @@ wails dev          # development
 wails build        # produces build/bin/strata-gui.exe
 ```
 
-The GUI uses the same `api.Client` as the CLI: sidebar of tracked files, version timeline, visual diffs, restore, a Stats dashboard, and live refresh on new versions. While the window is open it runs its own watcher (stop the daemon first if you use `strata start`).
+The GUI uses the same `api.Client` as the CLI with a GitHub Desktop–style layout: Files / Stats / Graph sidebar, a History column with a branch graph, side-by-side or inline diffs with folded unchanged lines, a change summary, and an Assistant panel (beta: built-in commands only, no AI model yet). Dark theme by default, light theme via the toggle in the sidebar footer. Branches and version titles are stored in the UI only for now (not yet in the SQLite store). While the window is open it runs its own watcher (stop the daemon first if you use `strata start`).
+
+UI mockups: `docs/mockups/`.
 
 Data lives under `%APPDATA%\Strata` on Windows (or `~/.strata` on macOS/Linux): `strata.db`, `objects/`, `config.json`, `strata.pid`, `strata.log`.
 
