@@ -95,7 +95,11 @@ func (t *Tracker) Add(path string) (versionNum int, err error) {
 	}
 
 	added, removed := t.lineStatsAgainstLatest(fileID, hash)
-	if _, err := t.db.InsertVersion(fileID, hash, info.Size(), time.Now(), added, removed); err != nil {
+	branch, err := t.db.CurrentBranch(fileID)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := t.db.InsertVersion(fileID, hash, info.Size(), time.Now(), added, removed, branch); err != nil {
 		return 0, err
 	}
 
@@ -201,7 +205,11 @@ func (t *Tracker) SnapshotIfChanged(path string) (SnapshotResult, error) {
 	if ok {
 		added, removed = t.lineStats(latest.Hash, hash)
 	}
-	if _, err := t.db.InsertVersion(f.ID, hash, info.Size(), time.Now(), added, removed); err != nil {
+	branch, err := t.db.CurrentBranch(f.ID)
+	if err != nil {
+		return SnapshotResult{}, err
+	}
+	if _, err := t.db.InsertVersion(f.ID, hash, info.Size(), time.Now(), added, removed, branch); err != nil {
 		return SnapshotResult{}, err
 	}
 	n, err := t.db.CountVersions(f.ID)
@@ -317,6 +325,8 @@ type HistoryEntry struct {
 	Hash         string
 	LinesAdded   *int
 	LinesRemoved *int
+	Branch       string
+	Title        string
 }
 
 // History lists versions for path, oldest first as version 1, 2, ...
@@ -338,9 +348,90 @@ func (t *Tracker) History(path string) ([]HistoryEntry, error) {
 			Hash:         v.Hash,
 			LinesAdded:   v.LinesAdded,
 			LinesRemoved: v.LinesRemoved,
+			Branch:       v.Branch,
+			Title:        v.Title,
 		})
 	}
 	return out, nil
+}
+
+// BranchInfo is a named branch for a tracked file.
+type BranchInfo struct {
+	Name        string
+	FromVersion int
+	CreatedAt   time.Time
+	Current     bool
+}
+
+// ListBranches returns branches for path with the current branch marked.
+func (t *Tracker) ListBranches(path string) ([]BranchInfo, error) {
+	f, err := t.fileByPath(path)
+	if err != nil {
+		return nil, err
+	}
+	branches, err := t.db.ListBranches(f.ID)
+	if err != nil {
+		return nil, err
+	}
+	cur, err := t.db.CurrentBranch(f.ID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]BranchInfo, 0, len(branches))
+	for _, b := range branches {
+		out = append(out, BranchInfo{
+			Name:        b.Name,
+			FromVersion: b.FromVersion,
+			CreatedAt:   b.CreatedAt,
+			Current:     b.Name == cur,
+		})
+	}
+	return out, nil
+}
+
+// CurrentBranch returns the checked-out branch for path.
+func (t *Tracker) CurrentBranch(path string) (string, error) {
+	f, err := t.fileByPath(path)
+	if err != nil {
+		return "", err
+	}
+	return t.db.CurrentBranch(f.ID)
+}
+
+// CheckoutBranch switches the checked-out branch for path.
+func (t *Tracker) CheckoutBranch(path, name string) error {
+	f, err := t.fileByPath(path)
+	if err != nil {
+		return err
+	}
+	return t.db.SetCurrentBranch(f.ID, name)
+}
+
+// CreateBranch forks a branch from a version and checks it out.
+func (t *Tracker) CreateBranch(path, name string, fromVersion int) (BranchInfo, error) {
+	f, err := t.fileByPath(path)
+	if err != nil {
+		return BranchInfo{}, err
+	}
+	b, err := t.db.CreateBranch(f.ID, name, fromVersion)
+	if err != nil {
+		return BranchInfo{}, err
+	}
+	return BranchInfo{
+		Name:        b.Name,
+		FromVersion: b.FromVersion,
+		CreatedAt:   b.CreatedAt,
+		Current:     true,
+	}, nil
+}
+
+// SetVersionTitle sets or clears a version's display title.
+func (t *Tracker) SetVersionTitle(path string, versionNum int, title string) error {
+	f, err := t.fileByPath(path)
+	if err != nil {
+		return err
+	}
+	return t.db.SetVersionTitle(f.ID, versionNum, title)
 }
 
 // DiffResult is a compare between two versions of a tracked file.

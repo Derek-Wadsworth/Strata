@@ -151,16 +151,44 @@ func run(args []string) error {
 				return nil
 			}
 			w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-			fmt.Fprintln(w, "VERSION\tTIME\tSIZE\tCHANGES")
+			fmt.Fprintln(w, "VERSION\tBRANCH\tTIME\tSIZE\tCHANGES\tTITLE")
 			for _, e := range entries {
-				fmt.Fprintf(w, "%d\t%s\t%d\t%s\n",
+				title := e.Title
+				if title == "" {
+					title = "-"
+				}
+				fmt.Fprintf(w, "%d\t%s\t%s\t%d\t%s\t%s\n",
 					e.Number,
+					e.Branch,
 					e.CreatedAt.Local().Format(time.RFC3339),
 					e.Size,
 					formatLineStats(e.LinesAdded, e.LinesRemoved),
+					title,
 				)
 			}
 			return w.Flush()
+		})
+	case "branch":
+		return runBranch(args[1:])
+	case "title":
+		if len(args) < 4 {
+			return fmt.Errorf("usage: strata title <file> <version> <title>")
+		}
+		num, err := strconv.Atoi(args[2])
+		if err != nil {
+			return fmt.Errorf("invalid version %q", args[2])
+		}
+		title := args[3]
+		for _, part := range args[4:] {
+			title += " " + part
+		}
+		return withClient(nil, func(c *api.Client) error {
+			if err := c.SetVersionTitle(args[1], num, title); err != nil {
+				return err
+			}
+			abs, _ := c.AbsPath(args[1])
+			fmt.Printf("set title on %s v%d\n", abs, num)
+			return nil
 		})
 	case "diff":
 		path, fromVer, toVer, statOnly, err := parseDiffArgs(args[1:])
@@ -306,6 +334,78 @@ func formatLineStats(added, removed *int) string {
 		return "-"
 	}
 	return fmt.Sprintf("+%d -%d", *added, *removed)
+}
+
+func runBranch(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: strata branch list <file>\n       strata branch create <file> <name> [from]\n       strata branch switch <file> <name>")
+	}
+	switch args[0] {
+	case "list":
+		if len(args) != 2 {
+			return fmt.Errorf("usage: strata branch list <file>")
+		}
+		return withClient(nil, func(c *api.Client) error {
+			branches, err := c.ListBranches(args[1])
+			if err != nil {
+				return err
+			}
+			w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+			fmt.Fprintln(w, "NAME\tFROM\tSTATUS")
+			for _, b := range branches {
+				status := ""
+				if b.Current {
+					status = "current"
+				}
+				fmt.Fprintf(w, "%s\tv%d\t%s\n", b.Name, b.FromVersion, status)
+			}
+			return w.Flush()
+		})
+	case "create":
+		if len(args) < 3 || len(args) > 4 {
+			return fmt.Errorf("usage: strata branch create <file> <name> [from]")
+		}
+		fromVer := 0
+		if len(args) == 4 {
+			n, err := strconv.Atoi(args[3])
+			if err != nil {
+				return fmt.Errorf("invalid from version %q", args[3])
+			}
+			fromVer = n
+		}
+		return withClient(nil, func(c *api.Client) error {
+			if fromVer == 0 {
+				entries, err := c.History(args[1])
+				if err != nil {
+					return err
+				}
+				if len(entries) > 0 {
+					fromVer = entries[len(entries)-1].Number
+				}
+			}
+			b, err := c.CreateBranch(args[1], args[2], fromVer)
+			if err != nil {
+				return err
+			}
+			abs, _ := c.AbsPath(args[1])
+			fmt.Printf("created branch %s on %s (from v%d, now current)\n", b.Name, abs, b.FromVersion)
+			return nil
+		})
+	case "switch", "checkout":
+		if len(args) != 3 {
+			return fmt.Errorf("usage: strata branch switch <file> <name>")
+		}
+		return withClient(nil, func(c *api.Client) error {
+			if err := c.CheckoutBranch(args[1], args[2]); err != nil {
+				return err
+			}
+			abs, _ := c.AbsPath(args[1])
+			fmt.Printf("switched %s to %s\n", abs, args[2])
+			return nil
+		})
+	default:
+		return fmt.Errorf("unknown branch command %q\nusage: strata branch list|create|switch ...", args[0])
+	}
 }
 
 func withClient(log *slog.Logger, fn func(*api.Client) error) error {

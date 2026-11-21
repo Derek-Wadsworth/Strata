@@ -86,6 +86,16 @@ type VersionInfo struct {
 	Size         int64  `json:"size"`
 	LinesAdded   *int   `json:"linesAdded"`
 	LinesRemoved *int   `json:"linesRemoved"`
+	Branch       string `json:"branch"`
+	Title        string `json:"title"`
+}
+
+// BranchInfo is a named branch for a tracked file.
+type BranchInfo struct {
+	Name        string `json:"name"`
+	FromVersion int    `json:"fromVersion"`
+	CreatedAt   string `json:"createdAt"`
+	Current     bool   `json:"current"`
 }
 
 // RestoreInfo is returned after a restore.
@@ -164,9 +174,73 @@ func (a *App) History(path string) ([]VersionInfo, error) {
 			Size:         e.Size,
 			LinesAdded:   e.LinesAdded,
 			LinesRemoved: e.LinesRemoved,
+			Branch:       e.Branch,
+			Title:        e.Title,
 		})
 	}
 	return out, nil
+}
+
+// ListBranches returns branches for a file.
+func (a *App) ListBranches(path string) ([]BranchInfo, error) {
+	if a.client == nil {
+		return nil, fmt.Errorf("app not ready")
+	}
+	branches, err := a.client.ListBranches(path)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]BranchInfo, 0, len(branches))
+	for _, b := range branches {
+		out = append(out, BranchInfo{
+			Name:        b.Name,
+			FromVersion: b.FromVersion,
+			CreatedAt:   b.CreatedAt.Local().Format(time.RFC3339),
+			Current:     b.Current,
+		})
+	}
+	return out, nil
+}
+
+// CurrentBranch returns the checked-out branch name.
+func (a *App) CurrentBranch(path string) (string, error) {
+	if a.client == nil {
+		return "", fmt.Errorf("app not ready")
+	}
+	return a.client.CurrentBranch(path)
+}
+
+// CheckoutBranch switches the checked-out branch.
+func (a *App) CheckoutBranch(path, name string) error {
+	if a.client == nil {
+		return fmt.Errorf("app not ready")
+	}
+	return a.client.CheckoutBranch(path, name)
+}
+
+// CreateBranch forks a branch from a version and checks it out.
+func (a *App) CreateBranch(path, name string, fromVersion int) (BranchInfo, error) {
+	if a.client == nil {
+		return BranchInfo{}, fmt.Errorf("app not ready")
+	}
+	b, err := a.client.CreateBranch(path, name, fromVersion)
+	if err != nil {
+		return BranchInfo{}, err
+	}
+	return BranchInfo{
+		Name:        b.Name,
+		FromVersion: b.FromVersion,
+		CreatedAt:   b.CreatedAt.Local().Format(time.RFC3339),
+		Current:     b.Current,
+	}, nil
+}
+
+// SetVersionTitle sets or clears a version's display title.
+func (a *App) SetVersionTitle(path string, version int, title string) error {
+	if a.client == nil {
+		return fmt.Errorf("app not ready")
+	}
+	return a.client.SetVersionTitle(path, version, title)
 }
 
 // ShowVersion returns a version's content as text.

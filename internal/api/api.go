@@ -128,6 +128,31 @@ func (c *Client) Dashboard() (stats.Dashboard, error) {
 	return c.tracker.Dashboard()
 }
 
+// ListBranches returns branches for a tracked file.
+func (c *Client) ListBranches(path string) ([]tracker.BranchInfo, error) {
+	return c.tracker.ListBranches(path)
+}
+
+// CurrentBranch returns the checked-out branch for a file.
+func (c *Client) CurrentBranch(path string) (string, error) {
+	return c.tracker.CurrentBranch(path)
+}
+
+// CheckoutBranch switches the checked-out branch for a file.
+func (c *Client) CheckoutBranch(path, name string) error {
+	return c.tracker.CheckoutBranch(path, name)
+}
+
+// CreateBranch forks a branch from a version and checks it out.
+func (c *Client) CreateBranch(path, name string, fromVersion int) (tracker.BranchInfo, error) {
+	return c.tracker.CreateBranch(path, name, fromVersion)
+}
+
+// SetVersionTitle sets or clears a version display title.
+func (c *Client) SetVersionTitle(path string, versionNum int, title string) error {
+	return c.tracker.SetVersionTitle(path, versionNum, title)
+}
+
 // Restore writes a version back to disk.
 func (c *Client) Restore(path string, versionNum int) (tracker.RestoreResult, error) {
 	return c.tracker.Restore(path, versionNum)
