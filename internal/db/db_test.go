@@ -22,7 +22,7 @@ func TestOpenMigratesAndRoundTrip(t *testing.T) {
 		t.Fatal("expected non-zero file id")
 	}
 
-	vid, err := d.InsertVersion(id, "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899", 12, time.Now(), nil, nil)
+	vid, err := d.InsertVersion(id, "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899", 12, time.Now(), nil, nil, "main")
 	if err != nil {
 		t.Fatalf("InsertVersion: %v", err)
 	}
@@ -81,10 +81,10 @@ func TestListVersionsAndVersionByNumber(t *testing.T) {
 	hash1 := "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
 	hash2 := "bbccddeeff00112233445566778899aabbccddeeff00112233445566778899aa"
 	added, removed := 2, 1
-	if _, err := d.InsertVersion(id, hash1, 1, time.Now(), nil, nil); err != nil {
+	if _, err := d.InsertVersion(id, hash1, 1, time.Now(), nil, nil, "main"); err != nil {
 		t.Fatalf("InsertVersion 1: %v", err)
 	}
-	if _, err := d.InsertVersion(id, hash2, 2, time.Now(), &added, &removed); err != nil {
+	if _, err := d.InsertVersion(id, hash2, 2, time.Now(), &added, &removed, "main"); err != nil {
 		t.Fatalf("InsertVersion 2: %v", err)
 	}
 

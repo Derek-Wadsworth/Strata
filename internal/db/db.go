@@ -26,6 +26,17 @@ type Version struct {
 	CreatedAt    time.Time
 	LinesAdded   *int // nil when unknown / binary / first version
 	LinesRemoved *int
+	Branch       string // branch this version was recorded on
+	Title        string // optional user-facing title
+}
+
+// Branch is a named line of versions for one file.
+type Branch struct {
+	ID          int64
+	FileID      int64
+	Name        string
+	FromVersion int // version number where this branch forked (0 for main)
+	CreatedAt   time.Time
 }
 
 // DB wraps the SQLite connection and schema helpers.
@@ -105,6 +116,34 @@ CREATE INDEX idx_versions_file_id ON versions(file_id);
 ALTER TABLE files ADD COLUMN missing INTEGER NOT NULL DEFAULT 0;
 `,
 		},
+		{
+			version: 3,
+			sql: `
+CREATE TABLE branches (
+	id INTEGER PRIMARY KEY,
+	file_id INTEGER NOT NULL REFERENCES files(id),
+	name TEXT NOT NULL,
+	from_version INTEGER NOT NULL DEFAULT 0,
+	created_at TEXT NOT NULL,
+	UNIQUE(file_id, name)
+);
+CREATE INDEX idx_branches_file_id ON branches(file_id);
+
+CREATE TABLE file_state (
+	file_id INTEGER PRIMARY KEY REFERENCES files(id),
+	current_branch TEXT NOT NULL DEFAULT 'main'
+);
+
+ALTER TABLE versions ADD COLUMN branch TEXT NOT NULL DEFAULT 'main';
+ALTER TABLE versions ADD COLUMN title TEXT;
+
+INSERT INTO branches(file_id, name, from_version, created_at)
+SELECT id, 'main', 0, added_at FROM files;
+
+INSERT INTO file_state(file_id, current_branch)
+SELECT id, 'main' FROM files;
+`,
+		},
 	}
 
 	for _, m := range migrations {
@@ -147,6 +186,9 @@ func (d *DB) UpsertActiveFile(path string, addedAt time.Time) (int64, error) {
 		if err != nil {
 			return 0, fmt.Errorf("lookup file id: %w", err)
 		}
+	}
+	if err := d.EnsureFileBranchDefaults(id, addedAt); err != nil {
+		return 0, err
 	}
 	return id, nil
 }
@@ -225,7 +267,7 @@ func (d *DB) GetFileByPath(path string) (File, error) {
 // ListVersions returns versions for a file oldest-first (version 1, 2, ...).
 func (d *DB) ListVersions(fileID int64) ([]Version, error) {
 	rows, err := d.sql.Query(`
-		SELECT id, file_id, hash, size, created_at, lines_added, lines_removed
+		SELECT id, file_id, hash, size, created_at, lines_added, lines_removed, branch, title
 		FROM versions
 		WHERE file_id = ?
 		ORDER BY id ASC`, fileID)
@@ -251,7 +293,7 @@ func (d *DB) VersionByNumber(fileID int64, number int) (Version, error) {
 		return Version{}, fmt.Errorf("version must be >= 1")
 	}
 	row := d.sql.QueryRow(`
-		SELECT id, file_id, hash, size, created_at, lines_added, lines_removed
+		SELECT id, file_id, hash, size, created_at, lines_added, lines_removed, branch, title
 		FROM versions
 		WHERE file_id = ?
 		ORDER BY id ASC
@@ -268,12 +310,16 @@ func (d *DB) VersionByNumber(fileID int64, number int) (Version, error) {
 
 // InsertVersion appends a version row for a file.
 // linesAdded/linesRemoved may be nil when stats are unknown (first version or binary).
-func (d *DB) InsertVersion(fileID int64, hash string, size int64, createdAt time.Time, linesAdded, linesRemoved *int) (int64, error) {
+// branch empty defaults to "main".
+func (d *DB) InsertVersion(fileID int64, hash string, size int64, createdAt time.Time, linesAdded, linesRemoved *int, branch string) (int64, error) {
+	if branch == "" {
+		branch = "main"
+	}
 	res, err := d.sql.Exec(`
-		INSERT INTO versions(file_id, hash, size, created_at, lines_added, lines_removed)
-		VALUES (?, ?, ?, ?, ?, ?)`,
+		INSERT INTO versions(file_id, hash, size, created_at, lines_added, lines_removed, branch, title)
+		VALUES (?, ?, ?, ?, ?, ?, ?, NULL)`,
 		fileID, hash, size, createdAt.UTC().Format(time.RFC3339Nano),
-		nullInt(linesAdded), nullInt(linesRemoved),
+		nullInt(linesAdded), nullInt(linesRemoved), branch,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert version: %w", err)
@@ -295,7 +341,7 @@ func nullInt(v *int) any {
 // LatestVersion returns the newest version for a file, or false if none exist.
 func (d *DB) LatestVersion(fileID int64) (Version, bool, error) {
 	row := d.sql.QueryRow(`
-		SELECT id, file_id, hash, size, created_at, lines_added, lines_removed
+		SELECT id, file_id, hash, size, created_at, lines_added, lines_removed, branch, title
 		FROM versions
 		WHERE file_id = ?
 		ORDER BY id DESC
@@ -427,8 +473,9 @@ func scanVersion(row rowScanner) (Version, error) {
 		createdAt    string
 		linesAdded   sql.NullInt64
 		linesRemoved sql.NullInt64
+		title        sql.NullString
 	)
-	if err := row.Scan(&v.ID, &v.FileID, &v.Hash, &v.Size, &createdAt, &linesAdded, &linesRemoved); err != nil {
+	if err := row.Scan(&v.ID, &v.FileID, &v.Hash, &v.Size, &createdAt, &linesAdded, &linesRemoved, &v.Branch, &title); err != nil {
 		return Version{}, err
 	}
 	t, err := time.Parse(time.RFC3339Nano, createdAt)
@@ -446,6 +493,12 @@ func scanVersion(row rowScanner) (Version, error) {
 	if linesRemoved.Valid {
 		n := int(linesRemoved.Int64)
 		v.LinesRemoved = &n
+	}
+	if v.Branch == "" {
+		v.Branch = "main"
+	}
+	if title.Valid {
+		v.Title = title.String
 	}
 	return v, nil
 }
