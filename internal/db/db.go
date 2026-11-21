@@ -320,6 +320,60 @@ func (d *DB) CountVersions(fileID int64) (int, error) {
 	return n, nil
 }
 
+// VersionEvent is a version joined with its file path for stats aggregation.
+type VersionEvent struct {
+	Path         string
+	Size         int64
+	CreatedAt    time.Time
+	LinesAdded   *int
+	LinesRemoved *int
+}
+
+// ListActiveVersionEvents returns all versions for active files, oldest first.
+func (d *DB) ListActiveVersionEvents() ([]VersionEvent, error) {
+	rows, err := d.sql.Query(`
+		SELECT f.path, v.size, v.created_at, v.lines_added, v.lines_removed
+		FROM versions v
+		INNER JOIN files f ON f.id = v.file_id
+		WHERE f.active = 1
+		ORDER BY v.created_at ASC, v.id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("list version events: %w", err)
+	}
+	defer rows.Close()
+
+	var out []VersionEvent
+	for rows.Next() {
+		var (
+			ev           VersionEvent
+			createdAt    string
+			linesAdded   sql.NullInt64
+			linesRemoved sql.NullInt64
+		)
+		if err := rows.Scan(&ev.Path, &ev.Size, &createdAt, &linesAdded, &linesRemoved); err != nil {
+			return nil, err
+		}
+		t, err := time.Parse(time.RFC3339Nano, createdAt)
+		if err != nil {
+			t, err = time.Parse(time.RFC3339, createdAt)
+			if err != nil {
+				return nil, fmt.Errorf("parse created_at: %w", err)
+			}
+		}
+		ev.CreatedAt = t
+		if linesAdded.Valid {
+			n := int(linesAdded.Int64)
+			ev.LinesAdded = &n
+		}
+		if linesRemoved.Valid {
+			n := int(linesRemoved.Int64)
+			ev.LinesRemoved = &n
+		}
+		out = append(out, ev)
+	}
+	return out, rows.Err()
+}
+
 // SetMissing marks whether a tracked file is currently missing on disk.
 func (d *DB) SetMissing(path string, missing bool) error {
 	flag := 0
