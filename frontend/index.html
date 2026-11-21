@@ -19,7 +19,11 @@
           <h1>Strata</h1>
           <p>Local version history</p>
         </header>
-        <div class="sidebar-actions">
+        <div class="nav-tabs">
+          <button type="button" class="tab active" id="nav-files">Files</button>
+          <button type="button" class="tab" id="nav-stats">Stats</button>
+        </div>
+        <div class="sidebar-actions" id="file-actions">
           <button id="add-btn" type="button">Add file</button>
           <button id="remove-btn" type="button" class="ghost" disabled>Remove</button>
         </div>
@@ -30,6 +34,39 @@
         <section class="empty" id="empty-state">
           <h2>Select a tracked file</h2>
           <p>Add a file to begin browsing versions, diffs, and restores.</p>
+        </section>
+
+        <section class="stats-panel hidden" id="stats-panel">
+          <header class="workspace-header">
+            <div>
+              <p class="eyebrow">Overview</p>
+              <h2>Editing statistics</h2>
+            </div>
+            <button type="button" class="ghost" id="refresh-stats">Refresh</button>
+          </header>
+          <div class="stat-cards" id="stat-cards"></div>
+          <div class="stats-grid">
+            <article>
+              <h3>Edits over time</h3>
+              <div id="edits-chart" class="chart"></div>
+            </article>
+            <article>
+              <h3>Most active files</h3>
+              <div id="active-chart" class="chart"></div>
+            </article>
+            <article class="span-2">
+              <h3>Activity heatmap</h3>
+              <div id="heatmap" class="heatmap"></div>
+            </article>
+            <article class="span-2">
+              <h3>Size over time</h3>
+              <div id="size-chart" class="chart"></div>
+            </article>
+            <article class="span-2">
+              <h3>Work sessions</h3>
+              <ul id="session-list" class="session-list"></ul>
+            </article>
+          </div>
         </section>
 
         <section class="workspace hidden" id="workspace">

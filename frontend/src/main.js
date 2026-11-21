@@ -7,6 +7,7 @@ import {
   ShowVersion,
   RestoreVersion,
   DiffVersions,
+  GetDashboard,
 } from "../wailsjs/go/main/App.js";
 import { EventsOn } from "../wailsjs/runtime/runtime.js";
 
@@ -14,6 +15,7 @@ const fileListEl = document.getElementById("file-list");
 const versionListEl = document.getElementById("version-list");
 const emptyStateEl = document.getElementById("empty-state");
 const workspaceEl = document.getElementById("workspace");
+const statsPanelEl = document.getElementById("stats-panel");
 const selectedPathEl = document.getElementById("selected-path");
 const contentViewEl = document.getElementById("content-view");
 const diffViewEl = document.getElementById("diff-view");
@@ -27,12 +29,16 @@ const restoreBtn = document.getElementById("restore-btn");
 const prevChangeBtn = document.getElementById("prev-change");
 const nextChangeBtn = document.getElementById("next-change");
 const toastEl = document.getElementById("toast");
+const navFilesBtn = document.getElementById("nav-files");
+const navStatsBtn = document.getElementById("nav-stats");
+const fileActionsEl = document.getElementById("file-actions");
 
 let files = [];
 let selectedPath = null;
 let selectedVersion = null;
 let versions = [];
 let activeView = "diff"; // diff | content
+let appMode = "files"; // files | stats
 let diffMode = "inline"; // inline | side
 let currentDiff = null;
 let changeIndexes = [];
@@ -80,8 +86,144 @@ function showToast(message) {
 }
 
 function setWorkspaceVisible(visible) {
-  emptyStateEl.classList.toggle("hidden", visible);
-  workspaceEl.classList.toggle("hidden", !visible);
+  emptyStateEl.classList.toggle("hidden", visible || appMode === "stats");
+  workspaceEl.classList.toggle("hidden", !visible || appMode === "stats");
+}
+
+function setAppMode(mode) {
+  appMode = mode;
+  navFilesBtn.classList.toggle("active", mode === "files");
+  navStatsBtn.classList.toggle("active", mode === "stats");
+  fileActionsEl.classList.toggle("hidden", mode !== "files");
+  fileListEl.classList.toggle("hidden", mode !== "files");
+  statsPanelEl.classList.toggle("hidden", mode !== "stats");
+  if (mode === "stats") {
+    emptyStateEl.classList.add("hidden");
+    workspaceEl.classList.add("hidden");
+    loadDashboard();
+  } else {
+    setWorkspaceVisible(!!selectedPath);
+  }
+}
+
+function formatMinutes(mins) {
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return m ? `${h}h ${m}m` : `${h}h`;
+}
+
+async function loadDashboard() {
+  try {
+    const dash = await GetDashboard();
+    renderDashboard(dash || {});
+  } catch (err) {
+    showToast(String(err));
+  }
+}
+
+function renderDashboard(dash) {
+  const cards = document.getElementById("stat-cards");
+  cards.innerHTML = `
+    <div class="stat-card"><span>Files</span><strong>${dash.totalFiles || 0}</strong></div>
+    <div class="stat-card"><span>Versions</span><strong>${dash.totalVersions || 0}</strong></div>
+    <div class="stat-card"><span>Lines</span><strong>+${dash.linesAdded || 0} / -${dash.linesRemoved || 0}</strong></div>
+    <div class="stat-card"><span>Active time</span><strong>${formatMinutes(dash.estimatedActiveMinutes || 0)}</strong></div>
+    <div class="stat-card"><span>Sessions</span><strong>${dash.sessionCount || 0}</strong></div>
+  `;
+
+  renderBarChart(document.getElementById("edits-chart"), dash.editsPerDay || [], (d) => d.day.slice(5), (d) => d.count);
+  renderBarChart(
+    document.getElementById("active-chart"),
+    dash.mostActive || [],
+    (d) => d.name,
+    (d) => d.versions
+  );
+  renderHeatmap(document.getElementById("heatmap"), dash.heatmap || []);
+  renderSizeChart(document.getElementById("size-chart"), dash.files || []);
+  renderSessions(document.getElementById("session-list"), dash.sessions || []);
+}
+
+function renderBarChart(el, rows, labelFn, valueFn) {
+  if (!rows.length) {
+    el.innerHTML = `<div class="chart-empty">No data yet</div>`;
+    return;
+  }
+  const max = Math.max(...rows.map(valueFn), 1);
+  const width = Math.max(320, rows.length * 36);
+  const height = 160;
+  const bars = rows
+    .map((row, i) => {
+      const v = valueFn(row);
+      const h = Math.max(2, Math.round((v / max) * 110));
+      const x = 24 + i * 36;
+      const y = 130 - h;
+      return `<rect class="bar" x="${x}" y="${y}" width="22" height="${h}" rx="4"></rect>
+        <text x="${x + 11}" y="148" text-anchor="middle">${escapeHtml(labelFn(row))}</text>
+        <text x="${x + 11}" y="${y - 6}" text-anchor="middle">${v}</text>`;
+    })
+    .join("");
+  el.innerHTML = `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}">${bars}</svg>`;
+}
+
+function renderHeatmap(el, days) {
+  if (!days.length) {
+    el.innerHTML = `<div class="chart-empty">No activity yet</div>`;
+    return;
+  }
+  const map = Object.fromEntries(days.map((d) => [d.day, d.count]));
+  const max = Math.max(...days.map((d) => d.count), 1);
+  const end = new Date(days[days.length - 1].day + "T00:00:00Z");
+  const start = new Date(end);
+  start.setUTCDate(end.getUTCDate() - 119); // ~17 weeks
+  const cells = [];
+  for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+    const key = d.toISOString().slice(0, 10);
+    const count = map[key] || 0;
+    const level = count === 0 ? 0 : Math.min(4, Math.ceil((count / max) * 4));
+    cells.push(`<div class="heat-cell level-${level}" title="${key}: ${count} edit${count === 1 ? "" : "s"}"></div>`);
+  }
+  el.innerHTML = `<div class="heat-grid">${cells.join("")}</div>`;
+}
+
+function renderSizeChart(el, fileStats) {
+  const series = (fileStats || []).filter((f) => (f.sizeOverTime || []).length > 0);
+  if (!series.length) {
+    el.innerHTML = `<div class="chart-empty">No size history yet</div>`;
+    return;
+  }
+  // Show the most active file's size trend for clarity.
+  const top = [...series].sort((a, b) => b.totalVersions - a.totalVersions)[0];
+  const points = top.sizeOverTime || [];
+  const maxSize = Math.max(...points.map((p) => p.size), 1);
+  const width = 640;
+  const height = 170;
+  const coords = points.map((p, i) => {
+    const x = points.length === 1 ? 40 : 20 + (i / (points.length - 1)) * (width - 40);
+    const y = 140 - (p.size / maxSize) * 110;
+    return `${x},${y}`;
+  });
+  el.innerHTML = `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}">
+    <polyline fill="none" stroke="#0f766e" stroke-width="3" points="${coords.join(" ")}"></polyline>
+    <text x="20" y="20">${escapeHtml(top.name)} size</text>
+  </svg>`;
+}
+
+function renderSessions(el, sessions) {
+  if (!sessions.length) {
+    el.innerHTML = `<li class="chart-empty">No sessions yet</li>`;
+    return;
+  }
+  el.innerHTML = sessions
+    .slice()
+    .reverse()
+    .slice(0, 12)
+    .map((s) => {
+      const start = new Date(s.start).toLocaleString();
+      const end = new Date(s.end).toLocaleString();
+      return `<li><strong>${formatMinutes(s.minutes)}</strong> · ${s.saves} saves<br><span>${escapeHtml(start)} → ${escapeHtml(end)}</span></li>`;
+    })
+    .join("");
 }
 
 function setActiveView(view) {
@@ -416,7 +558,15 @@ restoreBtn.addEventListener("click", async () => {
   }
 });
 
+navFilesBtn.addEventListener("click", () => setAppMode("files"));
+navStatsBtn.addEventListener("click", () => setAppMode("stats"));
+document.getElementById("refresh-stats").addEventListener("click", () => loadDashboard());
+
 EventsOn("version:created", async (payload) => {
+  if (appMode === "stats") {
+    await loadDashboard();
+    return;
+  }
   await refreshFiles(payload?.path || selectedPath);
   if (payload?.path === selectedPath) {
     showToast(`New version ${payload.versionNum}`);
@@ -424,4 +574,5 @@ EventsOn("version:created", async (payload) => {
 });
 
 setActiveView("diff");
+setAppMode("files");
 refreshFiles().catch((err) => showToast(String(err)));
