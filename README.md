@@ -22,7 +22,7 @@ Personal file version tracker for local work. Strata watches files you choose, s
 ```
 +-------------------------------------------------+
 | Frontends                                       |
-| CLI (cmd/strata)             GUI (Wails, later) |
+| CLI (cmd/strata)             GUI (Wails)        |
 +------------------------+------------------------+
                          |
 +------------------------v------------------------+
@@ -41,7 +41,7 @@ The core library knows nothing about the CLI or GUI. Both frontends call the sam
 | Metadata | SQLite (modernc.org/sqlite) |
 | Snapshot content | Content-addressed files (SHA-256) |
 | Text diff | sergi/go-diff |
-| GUI (later) | Wails |
+| GUI | Wails |
 
 ## Quick start
 
@@ -73,13 +73,13 @@ wails dev          # development
 wails build        # produces build/bin/strata-gui.exe
 ```
 
-The GUI uses the same `api.Client` as the CLI: sidebar of tracked files, version timeline, content view, restore, and live refresh on new versions. While the window is open it runs its own watcher (stop the daemon first if you use `strata start`).
+The GUI uses the same `api.Client` as the CLI: sidebar of tracked files, version timeline, visual diffs, restore, a Stats dashboard, and live refresh on new versions. While the window is open it runs its own watcher (stop the daemon first if you use `strata start`).
 
 Data lives under `%APPDATA%\Strata` on Windows (or `~/.strata` on macOS/Linux): `strata.db`, `objects/`, `config.json`, `strata.pid`, `strata.log`.
 
 ## Status
 
-Milestone 9 complete: visual diffs in the GUI (inline and side-by-side), compare any two versions, change navigation, and binary-safe handling.
+Milestone 10 complete: stats package, work-session estimates, and a GUI dashboard (edits over time, heatmap, most active files, size trend).
 
 ## License
 
