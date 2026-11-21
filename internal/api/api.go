@@ -11,6 +11,7 @@ import (
 	"github.com/Derek-Wadsworth/Strata/internal/config"
 	"github.com/Derek-Wadsworth/Strata/internal/daemon"
 	"github.com/Derek-Wadsworth/Strata/internal/db"
+	"github.com/Derek-Wadsworth/Strata/internal/stats"
 	"github.com/Derek-Wadsworth/Strata/internal/store"
 	"github.com/Derek-Wadsworth/Strata/internal/tracker"
 	"github.com/Derek-Wadsworth/Strata/internal/watcher"
@@ -120,6 +121,11 @@ func (c *Client) Show(path string, versionNum int) ([]byte, error) {
 // Diff compares two versions (0,0 = previous vs latest).
 func (c *Client) Diff(path string, fromVer, toVer int) (tracker.DiffResult, error) {
 	return c.tracker.Diff(path, fromVer, toVer)
+}
+
+// Dashboard returns aggregate stats for the GUI.
+func (c *Client) Dashboard() (stats.Dashboard, error) {
+	return c.tracker.Dashboard()
 }
 
 // Restore writes a version back to disk.

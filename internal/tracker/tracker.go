@@ -12,6 +12,7 @@ import (
 
 	"github.com/Derek-Wadsworth/Strata/internal/db"
 	"github.com/Derek-Wadsworth/Strata/internal/diff"
+	"github.com/Derek-Wadsworth/Strata/internal/stats"
 	"github.com/Derek-Wadsworth/Strata/internal/store"
 	"github.com/Derek-Wadsworth/Strata/internal/watcher"
 )
@@ -500,6 +501,29 @@ func (t *Tracker) Export(path string, versionNum int, dest string) error {
 		return fmt.Errorf("create dest dir: %w", err)
 	}
 	return writeFileAtomic(absDest, data)
+}
+
+// Dashboard returns aggregate editing statistics for active tracked files.
+func (t *Tracker) Dashboard() (stats.Dashboard, error) {
+	rows, err := t.db.ListActiveVersionEvents()
+	if err != nil {
+		return stats.Dashboard{}, err
+	}
+	events := make([]stats.Event, 0, len(rows))
+	for _, r := range rows {
+		ev := stats.Event{
+			Path:      r.Path,
+			Size:      r.Size,
+			CreatedAt: r.CreatedAt,
+		}
+		if r.LinesAdded != nil && r.LinesRemoved != nil {
+			ev.HasLineStats = true
+			ev.LinesAdded = *r.LinesAdded
+			ev.LinesRemoved = *r.LinesRemoved
+		}
+		events = append(events, ev)
+	}
+	return stats.BuildDashboard(events, stats.DefaultSessionGap), nil
 }
 
 func (t *Tracker) fileByPath(path string) (db.File, error) {

@@ -10,6 +10,10 @@ export function DiffVersions(arg1, arg2, arg3) {
   return window['go']['main']['App']['DiffVersions'](arg1, arg2, arg3);
 }
 
+export function GetDashboard() {
+  return window['go']['main']['App']['GetDashboard']();
+}
+
 export function History(arg1) {
   return window['go']['main']['App']['History'](arg1);
 }

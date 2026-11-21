@@ -7,6 +7,7 @@ import (
 
 	"github.com/Derek-Wadsworth/Strata/internal/api"
 	"github.com/Derek-Wadsworth/Strata/internal/diff"
+	"github.com/Derek-Wadsworth/Strata/internal/stats"
 	"github.com/Derek-Wadsworth/Strata/internal/tracker"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -266,4 +267,12 @@ func opName(op diff.Op) string {
 	default:
 		return "equal"
 	}
+}
+
+// GetDashboard returns aggregate editing statistics.
+func (a *App) GetDashboard() (stats.Dashboard, error) {
+	if a.client == nil {
+		return stats.Dashboard{}, fmt.Errorf("app not ready")
+	}
+	return a.client.Dashboard()
 }
