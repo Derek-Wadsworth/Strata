@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -7,117 +7,188 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <div id="app">
-      <aside class="sidebar">
-        <header class="brand">
+    <div id="app" class="shell">
+      <!-- Sidebar -->
+      <aside class="col sidebar">
+        <header class="col-head brand">
+          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
           <h1>Strata</h1>
-          <p>Local version history</p>
         </header>
-        <div class="nav-tabs">
-          <button type="button" class="tab active" id="nav-files">Files</button>
-          <button type="button" class="tab" id="nav-stats">Stats</button>
+
+        <div class="sidebar-body">
+          <div class="seg seg-full" role="tablist">
+            <button type="button" class="seg-btn active" id="nav-files">Files</button>
+            <button type="button" class="seg-btn" id="nav-stats">Stats</button>
+            <button type="button" class="seg-btn" id="nav-graph">Graph</button>
+          </div>
+
+          <div class="sidebar-actions">
+            <button type="button" class="btn btn-primary" id="add-btn"><span class="plus">+</span> Add file</button>
+            <button type="button" class="btn btn-secondary" id="find-btn"><span class="spark">✦</span> Find</button>
+          </div>
+
+          <p class="section-label" id="project-label">Tracked files</p>
+          <ul id="file-list" class="file-list"></ul>
+
+          <p class="section-label">Branches</p>
+          <ul id="branch-list" class="branch-list"></ul>
+          <button type="button" class="btn btn-secondary btn-block" id="create-branch-btn">New branch</button>
         </div>
-        <div class="sidebar-actions" id="file-actions">
-          <button id="add-btn" type="button">Add file</button>
-          <button id="remove-btn" type="button" class="ghost" disabled>Remove</button>
-        </div>
-        <ul id="file-list" class="file-list"></ul>
+
+        <footer class="sidebar-foot">
+          <span class="watch-dot" aria-hidden="true"></span>
+          <span id="watch-status">Watching 0 files · up to date</span>
+          <button type="button" class="theme-btn" id="theme-toggle" title="Toggle light / dark" aria-label="Toggle theme">
+            <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+              <path fill="currentColor" d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm0 1.5v10a5 5 0 0 1 0-10Z" />
+            </svg>
+          </button>
+        </footer>
       </aside>
 
-      <main class="main">
-        <section class="empty" id="empty-state">
-          <h2>Select a tracked file</h2>
-          <p>Add a file to begin browsing versions, diffs, and restores.</p>
-        </section>
+      <!-- History -->
+      <aside class="col history" id="history-col">
+        <header class="col-head">
+          <h2>History</h2>
+          <button type="button" class="btn btn-secondary btn-sm" id="branch-filter-btn">All branches</button>
+        </header>
+        <ul id="version-list" class="version-list"></ul>
+      </aside>
 
-        <section class="stats-panel hidden" id="stats-panel">
-          <header class="workspace-header">
-            <div>
-              <p class="eyebrow">Overview</p>
-              <h2>Editing statistics</h2>
-            </div>
-            <button type="button" class="ghost" id="refresh-stats">Refresh</button>
-          </header>
-          <div class="stat-cards" id="stat-cards"></div>
-          <div class="stats-grid">
-            <article>
-              <h3>Edits over time</h3>
-              <div id="edits-chart" class="chart"></div>
-            </article>
-            <article>
-              <h3>Most active files</h3>
-              <div id="active-chart" class="chart"></div>
-            </article>
-            <article class="span-2">
-              <h3>Activity heatmap</h3>
-              <div id="heatmap" class="heatmap"></div>
-            </article>
-            <article class="span-2">
-              <h3>Size over time</h3>
-              <div id="size-chart" class="chart"></div>
-            </article>
-            <article class="span-2">
-              <h3>Work sessions</h3>
-              <ul id="session-list" class="session-list"></ul>
-            </article>
+      <!-- Main -->
+      <main class="col main">
+        <header class="col-head topbar">
+          <label class="search">
+            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+              <path fill="currentColor" d="M10.68 11.74a6 6 0 1 1 1.06-1.06l3.04 3.04-1.06 1.06-3.04-3.04ZM6.5 11a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Z" />
+            </svg>
+            <input id="search-input" type="text" placeholder="Search files and versions, or ask the assistant..." autocomplete="off" />
+            <kbd>Ctrl K</kbd>
+          </label>
+          <div class="branch-select-wrap">
+            <select id="branch-select" title="Current branch"></select>
           </div>
-        </section>
+          <button type="button" class="btn btn-primary" id="ask-ai-btn"><span class="spark">✦</span> Ask AI</button>
+        </header>
 
-        <section class="workspace hidden" id="workspace">
-          <header class="workspace-header">
-            <div>
-              <p class="eyebrow">Tracked file</p>
-              <h2 id="selected-path"></h2>
+        <div class="main-body">
+          <section class="empty hidden" id="empty-state">
+            <div class="empty-card">
+              <h2>No file selected</h2>
+              <p>Add a file to start tracking. Strata saves a version every time you save.</p>
+              <button type="button" class="btn btn-primary" id="empty-add-btn"><span class="plus">+</span> Add file</button>
             </div>
-          </header>
+          </section>
 
-          <div class="workspace-grid">
-            <div class="timeline-panel">
-              <h3>Versions</h3>
-              <ul id="version-list" class="version-list"></ul>
+          <section class="workspace hidden" id="workspace">
+            <div class="file-head">
+              <div class="file-title">
+                <h2 id="selected-name"></h2>
+                <span class="pill" id="selected-branch-pill">main</span>
+              </div>
+              <p class="file-path" id="selected-path"></p>
             </div>
-            <div class="content-panel">
-              <div class="content-toolbar">
-                <div class="view-tabs" role="tablist">
-                  <button type="button" class="tab active" data-view="diff" id="tab-diff">Diff</button>
-                  <button type="button" class="tab" data-view="content" id="tab-content">Content</button>
-                </div>
-                <button id="restore-btn" type="button" class="ghost" disabled>Restore</button>
-              </div>
 
-              <div id="diff-controls" class="diff-controls">
-                <label>
-                  From
-                  <select id="from-ver"></select>
-                </label>
-                <label>
-                  To
-                  <select id="to-ver"></select>
-                </label>
-                <div class="mode-tabs">
-                  <button type="button" class="tab active" data-mode="inline" id="mode-inline">Inline</button>
-                  <button type="button" class="tab" data-mode="side" id="mode-side">Side by side</button>
-                </div>
-                <div class="nav-btns">
-                  <button type="button" class="ghost" id="prev-change" disabled>Prev change</button>
-                  <button type="button" class="ghost" id="next-change" disabled>Next change</button>
-                </div>
-                <p id="diff-stat" class="diff-stat"></p>
+            <div class="controls">
+              <div class="seg" role="tablist">
+                <button type="button" class="seg-btn active" id="tab-diff">Changes</button>
+                <button type="button" class="seg-btn" id="tab-content">Content</button>
               </div>
+              <div class="seg" id="mode-seg">
+                <button type="button" class="seg-btn" id="mode-inline">Inline</button>
+                <button type="button" class="seg-btn active" id="mode-side">Side by side</button>
+              </div>
+              <button type="button" class="btn btn-secondary" id="prev-change" disabled>‹ Prev change</button>
+              <button type="button" class="btn btn-secondary" id="next-change" disabled>Next change ›</button>
+            </div>
 
+            <div class="controls controls-right">
+              <span class="compare" id="compare">
+                <select id="from-ver" class="inline-select" title="Compare from"></select>
+                <span class="arrow">→</span>
+                <span id="to-label">v1</span>
+                <span class="dot-sep">·</span>
+                <span id="diff-stat" class="diff-stat"></span>
+              </span>
+              <button type="button" class="btn btn-secondary" id="restore-btn" disabled>Restore</button>
+            </div>
+
+            <div class="summary" id="summary">
+              <span class="spark">✦</span>
+              <p id="summary-text"></p>
+            </div>
+
+            <div class="diff-card" id="diff-card">
+              <div class="diff-head" id="diff-head"></div>
               <div id="diff-view" class="diff-view"></div>
-              <pre id="content-view" class="content-view hidden">Select a version to view its contents.</pre>
             </div>
-          </div>
-        </section>
+            <pre id="content-view" class="content-view hidden"></pre>
+          </section>
+
+          <section class="stats-panel hidden" id="stats-panel">
+            <div class="file-head row">
+              <div>
+                <div class="file-title"><h2>Statistics</h2></div>
+                <p class="file-path">Editing activity across all tracked files</p>
+              </div>
+              <button type="button" class="btn btn-secondary" id="refresh-stats">Refresh</button>
+            </div>
+            <div class="stat-cards" id="stat-cards"></div>
+            <div class="stats-grid">
+              <article><h3>Edits over time</h3><div id="edits-chart" class="chart"></div></article>
+              <article><h3>Most active files</h3><div id="active-chart" class="chart"></div></article>
+              <article class="span-2"><h3>Activity heatmap</h3><div id="heatmap" class="heatmap"></div></article>
+              <article class="span-2"><h3>Size over time</h3><div id="size-chart" class="chart"></div></article>
+              <article class="span-2"><h3>Work sessions</h3><ul id="session-list" class="session-list"></ul></article>
+            </div>
+          </section>
+
+          <section class="graph-panel hidden" id="graph-panel">
+            <div class="file-head">
+              <div class="file-title"><h2>File graph</h2><span class="pill pill-muted">preview</span></div>
+              <p class="file-path">Linking related files (code, docs, plans) arrives in a later milestone.</p>
+            </div>
+            <div class="graph-card" id="graph-view"></div>
+          </section>
+        </div>
       </main>
+
+      <!-- Assistant -->
+      <aside class="col assistant">
+        <header class="col-head">
+          <h2>Assistant</h2>
+          <span class="pill pill-outline">beta</span>
+        </header>
+        <div class="thread" id="thread"></div>
+        <form class="composer" id="agent-form">
+          <input id="agent-input" type="text" placeholder="Ask to find, restore, or compare..." autocomplete="off" />
+          <p>Restores always ask you to confirm first.</p>
+        </form>
+      </aside>
     </div>
+
+    <div id="branch-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="branch-modal-title">
+      <div class="modal-card">
+        <h3 id="branch-modal-title">New branch</h3>
+        <p id="branch-modal-desc">Branch from the selected version.</p>
+        <label class="field">
+          Name
+          <input id="branch-name-input" type="text" maxlength="40" placeholder="exp/ai-agent" autocomplete="off" />
+        </label>
+        <p class="modal-hint" id="branch-modal-hint"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="branch-cancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="branch-confirm">Create branch</button>
+        </div>
+      </div>
+    </div>
+
     <div id="toast" class="toast hidden" role="status"></div>
     <script type="module" src="/src/main.js"></script>
   </body>
