@@ -6,6 +6,18 @@ export function AddFile() {
   return window['go']['main']['App']['AddFile']();
 }
 
+export function CheckoutBranch(arg1, arg2) {
+  return window['go']['main']['App']['CheckoutBranch'](arg1, arg2);
+}
+
+export function CreateBranch(arg1, arg2, arg3) {
+  return window['go']['main']['App']['CreateBranch'](arg1, arg2, arg3);
+}
+
+export function CurrentBranch(arg1) {
+  return window['go']['main']['App']['CurrentBranch'](arg1);
+}
+
 export function DiffVersions(arg1, arg2, arg3) {
   return window['go']['main']['App']['DiffVersions'](arg1, arg2, arg3);
 }
@@ -18,6 +30,10 @@ export function History(arg1) {
   return window['go']['main']['App']['History'](arg1);
 }
 
+export function ListBranches(arg1) {
+  return window['go']['main']['App']['ListBranches'](arg1);
+}
+
 export function ListFiles() {
   return window['go']['main']['App']['ListFiles']();
 }
@@ -28,6 +44,10 @@ export function RemoveFile(arg1) {
 
 export function RestoreVersion(arg1, arg2) {
   return window['go']['main']['App']['RestoreVersion'](arg1, arg2);
+}
+
+export function SetVersionTitle(arg1, arg2, arg3) {
+  return window['go']['main']['App']['SetVersionTitle'](arg1, arg2, arg3);
 }
 
 export function ShowVersion(arg1, arg2) {

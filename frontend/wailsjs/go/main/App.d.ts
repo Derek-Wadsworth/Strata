@@ -5,16 +5,26 @@ import {stats} from '../models';
 
 export function AddFile():Promise<main.FileInfo>;
 
+export function CheckoutBranch(arg1:string,arg2:string):Promise<void>;
+
+export function CreateBranch(arg1:string,arg2:string,arg3:number):Promise<main.BranchInfo>;
+
+export function CurrentBranch(arg1:string):Promise<string>;
+
 export function DiffVersions(arg1:string,arg2:number,arg3:number):Promise<main.DiffInfo>;
 
 export function GetDashboard():Promise<stats.Dashboard>;
 
 export function History(arg1:string):Promise<Array<main.VersionInfo>>;
 
+export function ListBranches(arg1:string):Promise<Array<main.BranchInfo>>;
+
 export function ListFiles():Promise<Array<main.FileInfo>>;
 
 export function RemoveFile(arg1:string):Promise<void>;
 
 export function RestoreVersion(arg1:string,arg2:number):Promise<main.RestoreInfo>;
+
+export function SetVersionTitle(arg1:string,arg2:number,arg3:string):Promise<void>;
 
 export function ShowVersion(arg1:string,arg2:number):Promise<string>;

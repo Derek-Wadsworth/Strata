@@ -1,5 +1,23 @@
 export namespace main {
 	
+	export class BranchInfo {
+	    name: string;
+	    fromVersion: number;
+	    createdAt: string;
+	    current: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new BranchInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.fromVersion = source["fromVersion"];
+	        this.createdAt = source["createdAt"];
+	        this.current = source["current"];
+	    }
+	}
 	export class DiffLineInfo {
 	    op: string;
 	    text: string;
@@ -103,6 +121,8 @@ export namespace main {
 	    size: number;
 	    linesAdded?: number;
 	    linesRemoved?: number;
+	    branch: string;
+	    title: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new VersionInfo(source);
@@ -115,6 +135,8 @@ export namespace main {
 	        this.size = source["size"];
 	        this.linesAdded = source["linesAdded"];
 	        this.linesRemoved = source["linesRemoved"];
+	        this.branch = source["branch"];
+	        this.title = source["title"];
 	    }
 	}
 

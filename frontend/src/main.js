@@ -8,21 +8,13 @@ import {
   RestoreVersion,
   DiffVersions,
   GetDashboard,
+  ListBranches,
+  CheckoutBranch,
+  CreateBranch,
+  SetVersionTitle,
 } from "../wailsjs/go/main/App.js";
 import { EventsOn } from "../wailsjs/runtime/runtime.js";
-import {
-  listBranches,
-  laneOf,
-  getCurrentBranch,
-  setCurrentBranch,
-  branchOf,
-  versionsOnBranch,
-  versionVisibleOnBranch,
-  createBranch,
-  noteVersionOnCurrentBranch,
-  getTitle,
-  setTitle,
-} from "./branches.js";
+import { laneOf, versionsOnBranch, versionVisibleOnBranch } from "./branches.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -72,6 +64,8 @@ const DOT_Y = 18;
 let files = [];
 let selectedPath = null;
 let versions = [];
+let branches = [];
+let currentBranch = "main";
 let selectedVersion = null;
 let fromVersion = null;
 let activeView = "diff"; // diff | content
@@ -152,11 +146,11 @@ function defaultTitle(v) {
 }
 
 function titleFor(v) {
-  return getTitle(selectedPath, v.number) || defaultTitle(v);
+  return (v.title || "").trim() || defaultTitle(v);
 }
 
-function pillClass(path, branch) {
-  const lane = Math.min(laneOf(path, branch), MAX_LANES - 1);
+function pillClass(branch) {
+  const lane = Math.min(laneOf(branches, branch), MAX_LANES - 1);
   return lane === 0 ? "pill" : `pill branch-${lane}`;
 }
 
@@ -273,6 +267,23 @@ function renderFiles() {
   renderProjectLabel();
 }
 
+async function loadBranches(path = selectedPath) {
+  if (!path) {
+    branches = [];
+    currentBranch = "main";
+    return;
+  }
+  try {
+    branches = (await ListBranches(path)) || [];
+    const cur = branches.find((b) => b.current);
+    currentBranch = cur?.name || branches[0]?.name || "main";
+  } catch (err) {
+    branches = [{ name: "main", fromVersion: 0, current: true }];
+    currentBranch = "main";
+    showToast(String(err));
+  }
+}
+
 function renderBranches() {
   branchListEl.innerHTML = "";
   branchSelectEl.innerHTML = "";
@@ -285,17 +296,16 @@ function renderBranches() {
   }
   branchSelectEl.disabled = false;
   $("create-branch-btn").disabled = false;
-  const current = getCurrentBranch(selectedPath);
-  for (const b of listBranches(selectedPath)) {
-    const own = versionsOnBranch(selectedPath, b.name, versions).length;
+  for (const b of branches) {
+    const own = versionsOnBranch(versions, b.name).length;
     let note;
-    if (b.name === current) note = "current";
+    if (b.name === currentBranch) note = "current";
     else if (b.name === "main") note = `${own} version${own === 1 ? "" : "s"}`;
-    else note = own ? `${own} ahead` : `from v${b.fromVersion}`;
+    else note = own ? `${own} ahead` : `from v${b.fromVersion || 0}`;
 
     const li = document.createElement("li");
-    li.className = b.name === current ? "current" : "";
-    li.innerHTML = `<span class="${pillClass(selectedPath, b.name)}">${escapeHtml(b.name)}</span><span class="branch-note">${note}</span>`;
+    li.className = b.name === currentBranch ? "current" : "";
+    li.innerHTML = `<span class="${pillClass(b.name)}">${escapeHtml(b.name)}</span><span class="branch-note">${note}</span>`;
     li.addEventListener("click", () => switchBranch(b.name));
     branchListEl.appendChild(li);
 
@@ -304,17 +314,22 @@ function renderBranches() {
     opt.textContent = b.name;
     branchSelectEl.appendChild(opt);
   }
-  branchSelectEl.value = current;
-  selectedBranchPillEl.textContent = current;
-  selectedBranchPillEl.className = pillClass(selectedPath, current);
+  branchSelectEl.value = currentBranch;
+  selectedBranchPillEl.textContent = currentBranch;
+  selectedBranchPillEl.className = pillClass(currentBranch);
 }
 
-function switchBranch(name) {
+async function switchBranch(name) {
   if (!selectedPath) return;
-  setCurrentBranch(selectedPath, name);
-  renderBranches();
-  renderVersions();
-  showToast(`Switched to ${name}`);
+  try {
+    await CheckoutBranch(selectedPath, name);
+    await loadBranches();
+    renderBranches();
+    renderVersions();
+    showToast(`Switched to ${name}`);
+  } catch (err) {
+    showToast(String(err));
+  }
 }
 
 /* ———————————————————— Files & versions ———————————————————— */
@@ -329,6 +344,8 @@ async function refreshFiles(preferPath = selectedPath) {
   } else {
     selectedPath = null;
     versions = [];
+    branches = [];
+    currentBranch = "main";
     selectedVersion = null;
     renderBranches();
     renderVersions();
@@ -343,6 +360,7 @@ async function selectFile(path, keepVersion = null) {
   selectedNameEl.textContent = baseName(path);
   selectedPathEl.textContent = path;
   versions = (await History(path)) || [];
+  await loadBranches(path);
   renderFiles();
   renderBranches();
   updateMainVisibility();
@@ -362,8 +380,7 @@ async function selectFile(path, keepVersion = null) {
 function visibleVersions() {
   let list = versions;
   if (selectedPath && !showAllBranches) {
-    const cur = getCurrentBranch(selectedPath);
-    list = list.filter((v) => versionVisibleOnBranch(selectedPath, v.number, cur));
+    list = list.filter((v) => versionVisibleOnBranch(versions, branches, v.number, currentBranch));
   }
   const q = searchQuery.toLowerCase().trim();
   if (q) {
@@ -374,15 +391,22 @@ function visibleVersions() {
 
 function laneSpans() {
   const spans = [];
-  const branches = listBranches(selectedPath).slice(0, MAX_LANES);
-  branches.forEach((b, lane) => {
-    const own = versionsOnBranch(selectedPath, b.name, versions).map((v) => v.number);
+  const listed = branches.slice(0, MAX_LANES);
+  listed.forEach((b, lane) => {
+    const own = versionsOnBranch(versions, b.name).map((v) => v.number);
+    if (!own.length && lane !== 0) {
+      // Still show a fork marker from the branch point when empty.
+      if (b.fromVersion > 0) {
+        spans.push({ lane, name: b.name, hi: b.fromVersion, lo: b.fromVersion, fork: b.fromVersion });
+      }
+      return;
+    }
     if (!own.length) return;
     const hi = Math.max(...own);
     const lo = lane === 0 ? Math.min(...own) : b.fromVersion || Math.min(...own);
     spans.push({ lane, name: b.name, hi, lo, fork: lane === 0 ? null : b.fromVersion });
   });
-  return { spans, laneCount: Math.max(1, Math.min(branches.length, MAX_LANES)) };
+  return { spans, laneCount: Math.max(1, Math.min(listed.length, MAX_LANES)) };
 }
 
 function laneX(lane) {
@@ -408,7 +432,7 @@ function graphCellHtml(v, spans) {
     if (s.hi === s.lo && s.lane === 0) continue;
     html += `<span class="lane-line" style="${style}"></span>`;
   }
-  const lane = Math.min(laneOf(selectedPath, branchOf(selectedPath, v.number)), MAX_LANES - 1);
+  const lane = Math.min(laneOf(branches, v.branch || "main"), MAX_LANES - 1);
   html += `<span class="lane-dot" style="left:${laneX(lane)}px;background:${LANE_COLORS[lane]}"></span>`;
   return html;
 }
@@ -416,8 +440,7 @@ function graphCellHtml(v, spans) {
 function renderVersions() {
   versionListEl.innerHTML = "";
   if (selectedPath) {
-    const cur = getCurrentBranch(selectedPath);
-    branchFilterBtn.textContent = showAllBranches ? "All branches" : `${cur} only`;
+    branchFilterBtn.textContent = showAllBranches ? "All branches" : `${currentBranch} only`;
   }
   if (!selectedPath) {
     versionListEl.innerHTML = `<li class="history-empty">Select a file to see its history.</li>`;
@@ -432,7 +455,7 @@ function renderVersions() {
   const graphW = laneX(laneCount - 1) + 14;
 
   for (const v of shown) {
-    const branch = branchOf(selectedPath, v.number);
+    const branch = v.branch || "main";
     const li = document.createElement("li");
     li.className = `vrow${v.number === selectedVersion ? " active" : ""}`;
     li.style.setProperty("--graph-w", `${graphW}px`);
@@ -442,7 +465,7 @@ function renderVersions() {
       <div class="vrow-body">
         <div class="vrow-top">
           <span class="vrow-num">v${v.number}</span>
-          <span class="${pillClass(selectedPath, branch)}">${escapeHtml(branch)}</span>
+          <span class="${pillClass(branch)}">${escapeHtml(branch)}</span>
           <span class="vrow-time" title="${escapeHtml(new Date(v.createdAt).toLocaleString())}">${escapeHtml(relTime(v.createdAt))}</span>
         </div>
         <div class="vrow-title" title="Double-click to rename">${escapeHtml(titleFor(v))}</div>
@@ -465,10 +488,18 @@ function editTitle(el, v) {
   input.focus();
   input.select();
   let done = false;
-  const finish = (commit) => {
+  const finish = async (commit) => {
     if (done) return;
     done = true;
-    if (commit) setTitle(selectedPath, v.number, input.value === defaultTitle(v) ? "" : input.value);
+    if (commit && selectedPath) {
+      const next = input.value === defaultTitle(v) ? "" : input.value;
+      try {
+        await SetVersionTitle(selectedPath, v.number, next);
+        versions = (await History(selectedPath)) || [];
+      } catch (err) {
+        showToast(String(err));
+      }
+    }
     renderVersions();
   };
   input.addEventListener("click", (e) => e.stopPropagation());
@@ -794,14 +825,15 @@ function closeBranchModal() {
   branchModalEl.classList.add("hidden");
 }
 
-function confirmBranch() {
+async function confirmBranch() {
   try {
     const from = selectedVersion ?? latestVersion() ?? 0;
-    const name = createBranch(selectedPath, branchNameInput.value, from);
+    const b = await CreateBranch(selectedPath, branchNameInput.value, from);
     closeBranchModal();
+    await loadBranches();
     renderBranches();
     renderVersions();
-    showToast(`Created ${name} from v${from}`);
+    showToast(`Created ${b.name} from v${from}`);
   } catch (err) {
     branchModalHint.textContent = err.message || String(err);
   }
@@ -1198,9 +1230,6 @@ branchModalEl.addEventListener("click", (e) => {
 });
 
 EventsOn("version:created", async (payload) => {
-  if (payload?.path && payload?.versionNum != null) {
-    noteVersionOnCurrentBranch(payload.path, payload.versionNum);
-  }
   if (appMode === "stats") {
     await loadDashboard();
     return;
