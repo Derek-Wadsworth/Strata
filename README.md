@@ -15,7 +15,7 @@ Personal file version tracker for local work. Strata watches files you choose, s
 - Cloud sync or multi-user collaboration
 - Replacing Git — this is a personal, automatic, save-level history tool
 - Merging branches (create/switch is supported; merge is not)
-- Semantic diffing of binary formats (images, PDFs can be versioned and restored, but not line-diffed)
+- Semantic / AI understanding of image changes (pixel diffs are supported; video and PDF still version-only)
 
 ## Architecture
 
@@ -88,7 +88,7 @@ Data lives under `%APPDATA%\Strata` on Windows (or `~/.strata` on macOS/Linux): 
 
 ## Status
 
-File graph complete: undirected links between tracked files (migration 4), Graph tab with neighbors panel, and `strata link` / `unlink` / `graph`. Branches and version titles also persist in SQLite.
+Image diffs: 2-up, swipe, onion skin, and difference modes with changed-region overlays. File graph links and branch/title persistence remain available.
 
 ## License
 

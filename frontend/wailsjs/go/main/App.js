@@ -30,6 +30,10 @@ export function GetGraph() {
   return window['go']['main']['App']['GetGraph']();
 }
 
+export function GetVersionMedia(arg1, arg2) {
+  return window['go']['main']['App']['GetVersionMedia'](arg1, arg2);
+}
+
 export function History(arg1) {
   return window['go']['main']['App']['History'](arg1);
 }

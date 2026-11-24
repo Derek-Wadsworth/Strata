@@ -18,6 +18,8 @@ export function GetDashboard():Promise<stats.Dashboard>;
 
 export function GetGraph():Promise<graph.Graph>;
 
+export function GetVersionMedia(arg1:string,arg2:number):Promise<main.MediaInfo>;
+
 export function History(arg1:string):Promise<Array<main.VersionInfo>>;
 
 export function LinkFiles(arg1:string,arg2:string,arg3:string):Promise<graph.Edge>;

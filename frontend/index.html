@@ -104,6 +104,12 @@
                 <button type="button" class="seg-btn" id="mode-inline">Inline</button>
                 <button type="button" class="seg-btn active" id="mode-side">Side by side</button>
               </div>
+              <div class="seg hidden" id="image-mode-seg">
+                <button type="button" class="seg-btn" data-img-mode="swipe" id="img-mode-swipe">Swipe</button>
+                <button type="button" class="seg-btn active" data-img-mode="side" id="img-mode-side">2-up</button>
+                <button type="button" class="seg-btn" data-img-mode="onion" id="img-mode-onion">Onion skin</button>
+                <button type="button" class="seg-btn" data-img-mode="diff" id="img-mode-diff">Difference</button>
+              </div>
               <button type="button" class="btn btn-secondary" id="prev-change" disabled>‹ Prev change</button>
               <button type="button" class="btn btn-secondary" id="next-change" disabled>Next change ›</button>
             </div>
@@ -116,6 +122,14 @@
                 <span class="dot-sep">·</span>
                 <span id="diff-stat" class="diff-stat"></span>
               </span>
+              <label class="filter-check hidden" id="show-regions-wrap">
+                <input type="checkbox" id="show-regions" checked />
+                <span>Show changed regions</span>
+              </label>
+              <label class="sens-wrap hidden" id="sens-wrap">
+                Sensitivity
+                <input type="range" id="diff-sensitivity" min="0" max="100" value="35" />
+              </label>
               <button type="button" class="btn btn-secondary" id="restore-btn" disabled>Restore</button>
             </div>
 
@@ -128,7 +142,9 @@
               <div class="diff-head" id="diff-head"></div>
               <div id="diff-view" class="diff-view"></div>
             </div>
+            <div id="image-changes" class="image-changes hidden"></div>
             <pre id="content-view" class="content-view hidden"></pre>
+            <div id="content-image" class="content-image hidden"></div>
           </section>
 
           <section class="stats-panel hidden" id="stats-panel">

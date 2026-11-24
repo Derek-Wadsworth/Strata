@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"time"
 
 	"github.com/Derek-Wadsworth/Strata/internal/api"
 	"github.com/Derek-Wadsworth/Strata/internal/diff"
 	"github.com/Derek-Wadsworth/Strata/internal/graph"
+	"github.com/Derek-Wadsworth/Strata/internal/media"
 	"github.com/Derek-Wadsworth/Strata/internal/stats"
 	"github.com/Derek-Wadsworth/Strata/internal/tracker"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -256,6 +258,27 @@ func (a *App) ShowVersion(path string, version int) (string, error) {
 	return string(data), nil
 }
 
+// GetVersionMedia returns a version as base64 for previews (images).
+func (a *App) GetVersionMedia(path string, version int) (MediaInfo, error) {
+	if a.client == nil {
+		return MediaInfo{}, fmt.Errorf("app not ready")
+	}
+	data, err := a.client.Show(path, version)
+	if err != nil {
+		return MediaInfo{}, err
+	}
+	mime := media.MIME(path, data)
+	isImage := media.IsImagePath(path) || media.IsImageData(data)
+	return MediaInfo{
+		Path:    path,
+		Version: version,
+		Mime:    mime,
+		Base64:  base64.StdEncoding.EncodeToString(data),
+		Size:    int64(len(data)),
+		IsImage: isImage,
+	}, nil
+}
+
 // RestoreVersion restores a version to disk (with safety snapshot when needed).
 func (a *App) RestoreVersion(path string, version int) (RestoreInfo, error) {
 	if a.client == nil {
@@ -287,9 +310,20 @@ type DiffInfo struct {
 	FromVer      int            `json:"fromVer"`
 	ToVer        int            `json:"toVer"`
 	Binary       bool           `json:"binary"`
+	IsImage      bool           `json:"isImage"`
 	LinesAdded   int            `json:"linesAdded"`
 	LinesRemoved int            `json:"linesRemoved"`
 	Lines        []DiffLineInfo `json:"lines"`
+}
+
+// MediaInfo is a version payload for previews (images, etc.).
+type MediaInfo struct {
+	Path    string `json:"path"`
+	Version int    `json:"version"`
+	Mime    string `json:"mime"`
+	Base64  string `json:"base64"`
+	Size    int64  `json:"size"`
+	IsImage bool   `json:"isImage"`
 }
 
 // DiffVersions compares two versions of a file.
@@ -316,6 +350,7 @@ func (a *App) DiffVersions(path string, fromVer, toVer int) (DiffInfo, error) {
 		FromVer:      res.FromVer,
 		ToVer:        res.ToVer,
 		Binary:       res.Diff.Binary,
+		IsImage:      media.IsImagePath(path),
 		LinesAdded:   res.Diff.LinesAdded,
 		LinesRemoved: res.Diff.LinesRemoved,
 		Lines:        make([]DiffLineInfo, 0),

@@ -133,6 +133,7 @@ export namespace main {
 	    fromVer: number;
 	    toVer: number;
 	    binary: boolean;
+	    isImage: boolean;
 	    linesAdded: number;
 	    linesRemoved: number;
 	    lines: DiffLineInfo[];
@@ -147,6 +148,7 @@ export namespace main {
 	        this.fromVer = source["fromVer"];
 	        this.toVer = source["toVer"];
 	        this.binary = source["binary"];
+	        this.isImage = source["isImage"];
 	        this.linesAdded = source["linesAdded"];
 	        this.linesRemoved = source["linesRemoved"];
 	        this.lines = this.convertValues(source["lines"], DiffLineInfo);
@@ -187,6 +189,28 @@ export namespace main {
 	        this.versionCount = source["versionCount"];
 	        this.missing = source["missing"];
 	        this.addedAt = source["addedAt"];
+	    }
+	}
+	export class MediaInfo {
+	    path: string;
+	    version: number;
+	    mime: string;
+	    base64: string;
+	    size: number;
+	    isImage: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new MediaInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.version = source["version"];
+	        this.mime = source["mime"];
+	        this.base64 = source["base64"];
+	        this.size = source["size"];
+	        this.isImage = source["isImage"];
 	    }
 	}
 	export class RestoreInfo {

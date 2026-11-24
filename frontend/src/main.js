@@ -5,6 +5,7 @@ import {
   RemoveFile,
   History,
   ShowVersion,
+  GetVersionMedia,
   RestoreVersion,
   DiffVersions,
   GetDashboard,
@@ -18,6 +19,16 @@ import {
 } from "../wailsjs/go/main/App.js";
 import { EventsOn } from "../wailsjs/runtime/runtime.js";
 import { laneOf, versionsOnBranch, versionVisibleOnBranch } from "./branches.js";
+import {
+  isImagePath,
+  formatBytes,
+  mediaURL,
+  analyzeImageDiff,
+  buildImageSummary,
+  renderOverlays,
+  withBounds,
+  paintDifference,
+} from "./imageDiff.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -72,7 +83,8 @@ let currentBranch = "main";
 let selectedVersion = null;
 let fromVersion = null;
 let activeView = "diff"; // diff | content
-let diffMode = "side"; // inline | side
+let diffMode = "side"; // inline | side (text)
+let imageDiffMode = "side"; // swipe | side | onion | diff
 let appMode = "files"; // files | stats | graph
 let showAllBranches = true;
 let searchQuery = "";
@@ -82,6 +94,13 @@ let changeAnchors = [];
 let changeCursor = -1;
 let graphData = { nodes: [], edges: [] };
 let graphSelectedPath = null;
+let imageAnalysis = null;
+let imageMedia = { from: null, to: null };
+let showRegions = true;
+let diffSensitivity = 35;
+let activeRegionId = null;
+let onionAmount = 50;
+let swipePos = 50;
 
 /* ———————————————————— Helpers ———————————————————— */
 
@@ -555,31 +574,61 @@ function updateRestoreButton() {
 
 /* ———————————————————— Views ———————————————————— */
 
-function setActiveView(view) {
-  activeView = view;
-  $("tab-diff").classList.toggle("active", view === "diff");
-  $("tab-content").classList.toggle("active", view === "content");
-  const diff = view === "diff";
-  modeSegEl.classList.toggle("hidden", !diff);
+function viewingImage() {
+  return !!(selectedPath && (currentDiff?.isImage || isImagePath(selectedPath)));
+}
+
+function updateDiffChrome() {
+  const diff = activeView === "diff";
+  const img = diff && viewingImage() && fromVersion != null;
+  modeSegEl.classList.toggle("hidden", !diff || img);
+  $("image-mode-seg").classList.toggle("hidden", !img);
   prevChangeBtn.classList.toggle("hidden", !diff);
   nextChangeBtn.classList.toggle("hidden", !diff);
   compareEl.classList.toggle("hidden", !diff);
   summaryEl.classList.toggle("hidden", !diff);
   diffCardEl.classList.toggle("hidden", !diff);
-  contentViewEl.classList.toggle("hidden", diff);
+  $("show-regions-wrap").classList.toggle("hidden", !img);
+  $("sens-wrap").classList.toggle("hidden", !img);
+  const hasRegions = img && imageAnalysis?.regions?.length;
+  $("image-changes").classList.toggle("hidden", !hasRegions);
+  contentViewEl.classList.toggle("hidden", diff || viewingImage());
+  $("content-image").classList.toggle("hidden", diff || !viewingImage());
+}
+
+function setActiveView(view) {
+  activeView = view;
+  $("tab-diff").classList.toggle("active", view === "diff");
+  $("tab-content").classList.toggle("active", view === "content");
+  updateDiffChrome();
 }
 
 async function loadContent() {
   try {
+    if (isImagePath(selectedPath)) {
+      const media = await GetVersionMedia(selectedPath, selectedVersion);
+      contentViewEl.classList.add("hidden");
+      const box = $("content-image");
+      box.classList.remove("hidden");
+      box.innerHTML = `<img alt="v${selectedVersion}" src="${mediaURL(media)}" />`;
+      return;
+    }
+    $("content-image").classList.add("hidden");
+    contentViewEl.classList.remove("hidden");
     const text = await ShowVersion(selectedPath, selectedVersion);
     contentViewEl.textContent = text === "" ? "(empty file)" : text;
   } catch (err) {
+    $("content-image").classList.add("hidden");
+    contentViewEl.classList.remove("hidden");
     contentViewEl.textContent = String(err);
   }
 }
 
 async function loadDiff() {
   if (!selectedPath || selectedVersion == null) return;
+  imageAnalysis = null;
+  imageMedia = { from: null, to: null };
+  activeRegionId = null;
   if (fromVersion == null) {
     currentDiff = null;
     changeAnchors = [];
@@ -591,17 +640,28 @@ async function loadDiff() {
     )}</code>. Save the file again to see changes here.`;
     diffHeadEl.className = "diff-head single";
     diffHeadEl.innerHTML = `<span>v${selectedVersion} · ${escapeHtml(relTime(versionByNum(selectedVersion).createdAt))}</span>`;
+    diffViewEl.classList.remove("image-mode");
     diffViewEl.innerHTML = `<div class="diff-empty">Nothing to compare yet.</div>`;
+    $("image-changes").classList.add("hidden");
+    updateDiffChrome();
     return;
   }
   try {
     currentDiff = await DiffVersions(selectedPath, fromVersion, selectedVersion);
-    renderDiff();
+    if (currentDiff.isImage || isImagePath(selectedPath)) {
+      currentDiff.isImage = true;
+      await renderImageDiff();
+    } else {
+      renderDiff();
+    }
+    updateDiffChrome();
   } catch (err) {
     currentDiff = null;
+    diffViewEl.classList.remove("image-mode");
     diffViewEl.innerHTML = `<div class="diff-empty">${escapeHtml(String(err))}</div>`;
     changeAnchors = [];
     updateChangeNav();
+    updateDiffChrome();
   }
 }
 
@@ -617,10 +677,186 @@ function blocksOf(lines) {
   return blocks;
 }
 
+async function renderImageDiff() {
+  if (!currentDiff?.isImage || fromVersion == null) return;
+  const d = currentDiff;
+  const fromV = versionByNum(d.fromVer);
+  const toV = versionByNum(d.toVer);
+  diffViewEl.classList.add("image-mode");
+  diffHeadEl.className = "diff-head single";
+  diffHeadEl.innerHTML = `<span>v${d.fromVer} · ${fromV ? relTime(fromV.createdAt) : ""} → v${d.toVer} · ${
+    toV ? relTime(toV.createdAt) : ""
+  }</span>`;
+  diffViewEl.innerHTML = `<div class="diff-empty">Analyzing image changes…</div>`;
+  $("image-changes").classList.add("hidden");
+
+  try {
+    const [fromMedia, toMedia] = await Promise.all([
+      GetVersionMedia(selectedPath, d.fromVer),
+      GetVersionMedia(selectedPath, d.toVer),
+    ]);
+    imageMedia = { from: fromMedia, to: toMedia };
+    imageAnalysis = await analyzeImageDiff(mediaURL(fromMedia), mediaURL(toMedia), diffSensitivity);
+    paintImageDiffView();
+  } catch (err) {
+    diffViewEl.innerHTML = `<div class="diff-empty">${escapeHtml(String(err))}</div>`;
+  }
+}
+
+function paintImageDiffView() {
+  if (!currentDiff?.isImage || !imageAnalysis || !imageMedia.from || !imageMedia.to) return;
+  const d = currentDiff;
+  const fromV = versionByNum(d.fromVer);
+  const toV = versionByNum(d.toVer);
+  const regions = withBounds(imageAnalysis.regions, imageAnalysis.width, imageAnalysis.height);
+  const pct = imageAnalysis.percentChanged.toFixed(1);
+  diffStatEl.textContent = `${regions.length} changed region${regions.length === 1 ? "" : "s"} · ${pct}% of pixels`;
+  summaryTextEl.innerHTML = buildImageSummary(imageAnalysis, d.fromVer, d.toVer);
+  changeAnchors = regions.map((r) => r.id);
+  changeCursor = activeRegionId ? Math.max(0, regions.findIndex((r) => r.id === activeRegionId)) : -1;
+  updateChangeNav();
+
+  const fromMeta = `v${d.fromVer} · ${fromV ? relTime(fromV.createdAt) : ""} · ${formatBytes(imageMedia.from.size)} · ${imageAnalysis.width}×${imageAnalysis.height}`;
+  const toMeta = `v${d.toVer} · ${toV ? relTime(toV.createdAt) : ""} · ${formatBytes(imageMedia.to.size)} · ${imageAnalysis.width}×${imageAnalysis.height}`;
+  const urlA = mediaURL(imageMedia.from);
+  const urlB = mediaURL(imageMedia.to);
+
+  if (imageDiffMode === "side") {
+    diffViewEl.innerHTML = `
+      <div class="img-two-up">
+        <div class="img-pane">
+          <div class="img-pane-head"><span>${escapeHtml(fromMeta)}</span></div>
+          <div class="img-stage"><div class="img-frame">
+            <img src="${urlA}" alt="v${d.fromVer}" />
+            ${renderOverlays(regions, showRegions, activeRegionId)}
+          </div></div>
+        </div>
+        <div class="img-pane">
+          <div class="img-pane-head"><span>${escapeHtml(toMeta)}</span></div>
+          <div class="img-stage"><div class="img-frame">
+            <img src="${urlB}" alt="v${d.toVer}" />
+            ${renderOverlays(regions, showRegions, activeRegionId)}
+          </div></div>
+        </div>
+      </div>`;
+  } else if (imageDiffMode === "swipe") {
+    diffViewEl.innerHTML = `
+      <div class="img-single">
+        <div class="img-swipe" id="img-swipe">
+          <span class="img-swipe-label left">v${d.fromVer}</span>
+          <span class="img-swipe-label right">v${d.toVer}</span>
+          <div class="img-swipe-layers" id="img-swipe-layers">
+            <img id="img-swipe-before" src="${urlA}" alt="v${d.fromVer}" draggable="false" />
+            <div class="img-swipe-after" id="img-swipe-after">
+              <img id="img-swipe-after-img" src="${urlB}" alt="v${d.toVer}" draggable="false" />
+            </div>
+          </div>
+          <div class="img-swipe-handle" id="img-swipe-handle"></div>
+        </div>
+      </div>`;
+    const root = $("img-swipe");
+    const syncSwipe = () => {
+      const layers = $("img-swipe-layers");
+      const full = layers.clientWidth;
+      $("img-swipe-after-img").style.width = `${full}px`;
+      $("img-swipe-after-img").style.height = `${layers.clientHeight}px`;
+      $("img-swipe-after").style.width = `${swipePos}%`;
+      $("img-swipe-handle").style.left = `${swipePos}%`;
+    };
+    $("img-swipe-before").addEventListener("load", syncSwipe);
+    syncSwipe();
+    wireSwipe(root, syncSwipe);
+  } else if (imageDiffMode === "onion") {
+    const opacity = onionAmount / 100;
+    diffViewEl.innerHTML = `
+      <div class="img-single">
+        <div class="img-onion">
+          <img src="${urlA}" alt="v${d.fromVer}" />
+          <img class="onion-top" src="${urlB}" alt="v${d.toVer}" style="opacity:${opacity}" />
+        </div>
+        <div class="img-onion-controls">
+          <span>v${d.fromVer}</span>
+          <input type="range" id="onion-range" min="0" max="100" value="${onionAmount}" />
+          <span>v${d.toVer}</span>
+        </div>
+      </div>`;
+    $("onion-range").addEventListener("input", (e) => {
+      onionAmount = Number(e.target.value);
+      const top = diffViewEl.querySelector(".onion-top");
+      if (top) top.style.opacity = String(onionAmount / 100);
+    });
+  } else {
+    diffViewEl.innerHTML = `
+      <div class="img-single">
+        <div class="img-diff-canvas-wrap">
+          <canvas id="img-diff-canvas"></canvas>
+        </div>
+      </div>`;
+    paintDifference($("img-diff-canvas"), imageAnalysis, diffSensitivity, showRegions);
+  }
+
+  renderImageChangeCards(regions);
+  updateDiffChrome();
+}
+
+function renderImageChangeCards(regions) {
+  const el = $("image-changes");
+  if (!regions?.length) {
+    el.classList.add("hidden");
+    el.innerHTML = "";
+    return;
+  }
+  el.classList.remove("hidden");
+  el.innerHTML = regions
+    .map((r) => {
+      const active = activeRegionId === r.id ? " active" : "";
+      return `<article class="img-change-card${active}" data-region="${r.id}">
+        <div><span class="num">${r.id}</span><strong>${escapeHtml(r.label)}</strong></div>
+        <p>Clustered pixel changes in this area between the two versions.</p>
+        <div class="pct">${r.areaPct.toFixed(1)}% of image</div>
+      </article>`;
+    })
+    .join("");
+  el.querySelectorAll(".img-change-card").forEach((card) => {
+    card.addEventListener("click", () => {
+      activeRegionId = Number(card.dataset.region);
+      paintImageDiffView();
+    });
+  });
+}
+
+function wireSwipe(root, sync) {
+  const setPos = (clientX) => {
+    const rect = root.getBoundingClientRect();
+    swipePos = Math.min(98, Math.max(2, ((clientX - rect.left) / rect.width) * 100));
+    sync();
+  };
+  let dragging = false;
+  const onMove = (e) => {
+    if (!dragging) return;
+    setPos(e.clientX ?? e.touches?.[0]?.clientX);
+  };
+  const onUp = () => {
+    dragging = false;
+  };
+  root.addEventListener("pointerdown", (e) => {
+    dragging = true;
+    root.setPointerCapture?.(e.pointerId);
+    setPos(e.clientX);
+  });
+  root.addEventListener("pointermove", onMove);
+  root.addEventListener("pointerup", onUp);
+  root.addEventListener("pointercancel", onUp);
+  window.addEventListener("resize", sync, { once: true });
+}
+
 function summarize(diff) {
   const name = escapeHtml(baseName(selectedPath));
+  if (diff.isImage) {
+    return buildImageSummary(imageAnalysis, diff.fromVer, diff.toVer);
+  }
   if (diff.binary) {
-    return `<strong>Summary:</strong> <code>${name}</code> is a binary file. Strata keeps every version and can restore it; image and video previews are coming later.`;
+    return `<strong>Summary:</strong> <code>${name}</code> is a binary file. Strata keeps every version and can restore it; video diffs are planned later.`;
   }
   const a = diff.linesAdded;
   const r = diff.linesRemoved;
@@ -656,12 +892,19 @@ function renderDiff() {
 
   summaryEl.classList.remove("hidden");
   summaryTextEl.innerHTML = summarize(d);
+  diffViewEl.classList.remove("image-mode");
+  $("image-changes").classList.add("hidden");
+
+  if (d.isImage) {
+    renderImageDiff();
+    return;
+  }
 
   if (d.binary) {
     diffStatEl.textContent = "binary";
     diffHeadEl.className = "diff-head";
     diffHeadEl.innerHTML = `<span>${escapeHtml(fromLabel)}</span><span>${escapeHtml(toLabel)}</span>`;
-    diffViewEl.innerHTML = `<div class="diff-empty"><strong>Binary files differ</strong>Visual diffs for images and video are planned. Use Restore to bring back an earlier version.</div>`;
+    diffViewEl.innerHTML = `<div class="diff-empty"><strong>Binary files differ</strong>Video diffs are planned later. Use Restore to bring back an earlier version.</div>`;
     changeAnchors = [];
     updateChangeNav();
     return;
@@ -764,6 +1007,15 @@ function jumpChange(delta) {
         ? 0
         : changeAnchors.length - 1
       : (changeCursor + delta + changeAnchors.length) % changeAnchors.length;
+
+  if (currentDiff?.isImage) {
+    activeRegionId = changeAnchors[changeCursor];
+    paintImageDiffView();
+    const card = document.querySelector(`.img-change-card[data-region="${activeRegionId}"]`);
+    card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    return;
+  }
+
   const el = diffViewEl.querySelector(`[data-anchor="${changeAnchors[changeCursor]}"]`);
   if (!el) return;
   diffViewEl.querySelectorAll(".current-change").forEach((n) => n.classList.remove("current-change"));
@@ -1411,6 +1663,22 @@ $("mode-side").addEventListener("click", () => {
   $("mode-side").classList.add("active");
   $("mode-inline").classList.remove("active");
   renderDiff();
+});
+document.querySelectorAll("#image-mode-seg .seg-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    imageDiffMode = btn.dataset.imgMode;
+    document.querySelectorAll("#image-mode-seg .seg-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    if (imageAnalysis) paintImageDiffView();
+    else renderImageDiff();
+  });
+});
+$("show-regions").addEventListener("change", (e) => {
+  showRegions = e.target.checked;
+  if (imageAnalysis) paintImageDiffView();
+});
+$("diff-sensitivity").addEventListener("change", async (e) => {
+  diffSensitivity = Number(e.target.value);
+  if (currentDiff?.isImage) await renderImageDiff();
 });
 prevChangeBtn.addEventListener("click", () => jumpChange(-1));
 nextChangeBtn.addEventListener("click", () => jumpChange(1));

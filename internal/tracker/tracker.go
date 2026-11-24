@@ -12,6 +12,7 @@ import (
 
 	"github.com/Derek-Wadsworth/Strata/internal/db"
 	"github.com/Derek-Wadsworth/Strata/internal/diff"
+	"github.com/Derek-Wadsworth/Strata/internal/media"
 	"github.com/Derek-Wadsworth/Strata/internal/stats"
 	"github.com/Derek-Wadsworth/Strata/internal/store"
 	"github.com/Derek-Wadsworth/Strata/internal/watcher"
@@ -481,11 +482,18 @@ func (t *Tracker) Diff(path string, fromVer, toVer int) (DiffResult, error) {
 		return DiffResult{}, fmt.Errorf("load version %d: %w", toVer, err)
 	}
 
+	res := diff.Compare(oldData, newData)
+	if media.IsImagePath(f.Path) || media.IsImageData(oldData) || media.IsImageData(newData) {
+		res.Binary = true
+		res.Hunks = nil
+		res.LinesAdded = 0
+		res.LinesRemoved = 0
+	}
 	return DiffResult{
 		Path:    f.Path,
 		FromVer: fromVer,
 		ToVer:   toVer,
-		Diff:    diff.Compare(oldData, newData),
+		Diff:    res,
 	}, nil
 }
 
