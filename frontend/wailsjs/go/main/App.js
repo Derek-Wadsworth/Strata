@@ -26,8 +26,16 @@ export function GetDashboard() {
   return window['go']['main']['App']['GetDashboard']();
 }
 
+export function GetGraph() {
+  return window['go']['main']['App']['GetGraph']();
+}
+
 export function History(arg1) {
   return window['go']['main']['App']['History'](arg1);
+}
+
+export function LinkFiles(arg1, arg2, arg3) {
+  return window['go']['main']['App']['LinkFiles'](arg1, arg2, arg3);
 }
 
 export function ListBranches(arg1) {
@@ -52,4 +60,8 @@ export function SetVersionTitle(arg1, arg2, arg3) {
 
 export function ShowVersion(arg1, arg2) {
   return window['go']['main']['App']['ShowVersion'](arg1, arg2);
+}
+
+export function UnlinkFiles(arg1, arg2) {
+  return window['go']['main']['App']['UnlinkFiles'](arg1, arg2);
 }

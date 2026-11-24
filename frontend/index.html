@@ -150,11 +150,25 @@
           </section>
 
           <section class="graph-panel hidden" id="graph-panel">
-            <div class="file-head">
-              <div class="file-title"><h2>File graph</h2><span class="pill pill-muted">preview</span></div>
-              <p class="file-path">Linking related files (code, docs, plans) arrives in a later milestone.</p>
+            <div class="file-head row">
+              <div>
+                <div class="file-title">
+                  <h2>File graph</h2>
+                  <span class="pill" id="graph-count">0 links</span>
+                </div>
+                <p class="file-path">Connect related files — code, docs, plans — then jump between them.</p>
+              </div>
+              <button type="button" class="btn btn-primary" id="link-files-btn">Link files</button>
             </div>
-            <div class="graph-card" id="graph-view"></div>
+            <div class="graph-layout">
+              <aside class="graph-side" id="graph-side">
+                <p class="section-label">Selected</p>
+                <div id="graph-selected" class="graph-selected empty-pick">Click a file in the graph</div>
+                <p class="section-label">Linked to</p>
+                <ul id="graph-neighbors" class="graph-neighbors"></ul>
+              </aside>
+              <div class="graph-card" id="graph-view"></div>
+            </div>
           </section>
         </div>
       </main>
@@ -185,6 +199,30 @@
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" id="branch-cancel">Cancel</button>
           <button type="button" class="btn btn-primary" id="branch-confirm">Create branch</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="link-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="link-modal-title">
+      <div class="modal-card">
+        <h3 id="link-modal-title">Link files</h3>
+        <p>Create an undirected link between two tracked files.</p>
+        <label class="field">
+          File A
+          <select id="link-a"></select>
+        </label>
+        <label class="field" style="margin-top: 0.7rem">
+          File B
+          <select id="link-b"></select>
+        </label>
+        <label class="field" style="margin-top: 0.7rem">
+          Note <span style="font-weight:500;color:var(--ink-faint)">(optional)</span>
+          <input id="link-note" type="text" maxlength="120" placeholder="implements the design" autocomplete="off" />
+        </label>
+        <p class="modal-hint" id="link-modal-hint"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="link-cancel">Cancel</button>
+          <button type="button" class="btn btn-primary" id="link-confirm">Link</button>
         </div>
       </div>
     </div>

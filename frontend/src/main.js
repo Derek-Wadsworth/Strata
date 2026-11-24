@@ -8,6 +8,9 @@ import {
   RestoreVersion,
   DiffVersions,
   GetDashboard,
+  GetGraph,
+  LinkFiles,
+  UnlinkFiles,
   ListBranches,
   CheckoutBranch,
   CreateBranch,
@@ -77,6 +80,8 @@ let currentDiff = null;
 let expandedFolds = new Set();
 let changeAnchors = [];
 let changeCursor = -1;
+let graphData = { nodes: [], edges: [] };
+let graphSelectedPath = null;
 
 /* ———————————————————— Helpers ———————————————————— */
 
@@ -202,7 +207,7 @@ function setAppMode(mode) {
   graphPanelEl.classList.toggle("hidden", mode !== "graph");
   updateMainVisibility();
   if (mode === "stats") loadDashboard();
-  if (mode === "graph") renderGraph();
+  if (mode === "graph") loadGraph();
 }
 
 function updateMainVisibility() {
@@ -1078,44 +1083,282 @@ function renderSessions(el, sessions) {
     .join("");
 }
 
-/* ———————————————————— Graph preview ———————————————————— */
+/* ———————————————————— Graph ———————————————————— */
+
+async function loadGraph() {
+  try {
+    graphData = (await GetGraph()) || { nodes: [], edges: [] };
+    if (!graphData.nodes) graphData.nodes = [];
+    if (!graphData.edges) graphData.edges = [];
+    if (graphSelectedPath && !graphData.nodes.some((n) => n.path === graphSelectedPath)) {
+      graphSelectedPath = null;
+    }
+    renderGraph();
+  } catch (err) {
+    showToast(String(err));
+  }
+}
+
+function edgeNote(a, b) {
+  const edge = graphData.edges.find(
+    (e) => (e.from === a && e.to === b) || (e.from === b && e.to === a)
+  );
+  return edge?.note || "";
+}
+
+function neighborPaths(path) {
+  const out = [];
+  for (const e of graphData.edges) {
+    if (e.from === path) out.push(e.to);
+    else if (e.to === path) out.push(e.from);
+  }
+  return out;
+}
+
+function layoutGraphNodes(nodes, edges, W, H) {
+  const n = nodes.length;
+  if (!n) return [];
+  const cx = W / 2;
+  const cy = H / 2;
+  if (n === 1) return [{ ...nodes[0], x: cx, y: cy }];
+
+  // Connected components.
+  const adj = new Map(nodes.map((node) => [node.path, []]));
+  for (const e of edges) {
+    if (!adj.has(e.from) || !adj.has(e.to)) continue;
+    adj.get(e.from).push(e.to);
+    adj.get(e.to).push(e.from);
+  }
+  const seen = new Set();
+  const components = [];
+  for (const node of nodes) {
+    if (seen.has(node.path)) continue;
+    const stack = [node.path];
+    const comp = [];
+    seen.add(node.path);
+    while (stack.length) {
+      const p = stack.pop();
+      comp.push(p);
+      for (const nb of adj.get(p) || []) {
+        if (!seen.has(nb)) {
+          seen.add(nb);
+          stack.push(nb);
+        }
+      }
+    }
+    components.push(comp);
+  }
+
+  const byPath = Object.fromEntries(nodes.map((node) => [node.path, node]));
+  const placed = [];
+  const cols = Math.ceil(Math.sqrt(components.length));
+  const rows = Math.ceil(components.length / cols);
+  const cellW = W / cols;
+  const cellH = H / rows;
+
+  components.forEach((comp, ci) => {
+    const col = ci % cols;
+    const row = Math.floor(ci / cols);
+    const ox = cellW * col + cellW / 2;
+    const oy = cellH * row + cellH / 2;
+    const radius = Math.min(cellW, cellH) * 0.32;
+    comp.forEach((path, i) => {
+      const node = byPath[path];
+      if (comp.length === 1) {
+        placed.push({ ...node, x: ox, y: oy });
+        return;
+      }
+      const angle = (i / comp.length) * Math.PI * 2 - Math.PI / 2;
+      placed.push({
+        ...node,
+        x: ox + Math.cos(angle) * radius,
+        y: oy + Math.sin(angle) * radius,
+      });
+    });
+  });
+  return placed;
+}
+
+function renderGraphSide() {
+  const selectedEl = $("graph-selected");
+  const neighborsEl = $("graph-neighbors");
+  if (!graphSelectedPath) {
+    selectedEl.className = "graph-selected empty-pick";
+    selectedEl.textContent = "Click a file in the graph";
+    neighborsEl.innerHTML = `<li class="chart-empty" style="border:0;background:transparent;padding:4px 0">No selection</li>`;
+    return;
+  }
+  const node = graphData.nodes.find((n) => n.path === graphSelectedPath);
+  if (!node) {
+    graphSelectedPath = null;
+    renderGraphSide();
+    return;
+  }
+  selectedEl.className = "graph-selected";
+  selectedEl.innerHTML = `
+    <span class="sel-name">${escapeHtml(node.name || baseName(node.path))}</span>
+    <span class="sel-meta">${node.versionCount} version${node.versionCount === 1 ? "" : "s"}${
+      node.missing ? " · missing" : ""
+    }</span>
+    <div class="sel-actions">
+      <button type="button" class="btn btn-secondary btn-sm" id="graph-open-btn">Open</button>
+      <button type="button" class="btn btn-secondary btn-sm" id="graph-link-from-btn">Link…</button>
+    </div>`;
+  $("graph-open-btn").addEventListener("click", () => {
+    setAppMode("files");
+    selectFile(node.path);
+  });
+  $("graph-link-from-btn").addEventListener("click", () => openLinkModal(node.path));
+
+  const neighbors = neighborPaths(graphSelectedPath);
+  if (!neighbors.length) {
+    neighborsEl.innerHTML = `<li class="chart-empty" style="border:0;background:transparent;padding:4px 0">No links yet</li>`;
+    return;
+  }
+  neighborsEl.innerHTML = neighbors
+    .map((path) => {
+      const n = graphData.nodes.find((x) => x.path === path);
+      const note = edgeNote(graphSelectedPath, path);
+      return `<li>
+        <div class="nb-main" data-path="${escapeHtml(path)}">
+          <span class="nb-name">${escapeHtml(n?.name || baseName(path))}</span>
+          ${note ? `<span class="nb-note">${escapeHtml(note)}</span>` : ""}
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm nb-unlink" data-path="${escapeHtml(path)}">Unlink</button>
+      </li>`;
+    })
+    .join("");
+  neighborsEl.querySelectorAll(".nb-main").forEach((el) => {
+    el.addEventListener("click", () => {
+      graphSelectedPath = el.dataset.path;
+      renderGraph();
+    });
+  });
+  neighborsEl.querySelectorAll(".nb-unlink").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      try {
+        await UnlinkFiles(graphSelectedPath, btn.dataset.path);
+        showToast("Link removed");
+        await loadGraph();
+      } catch (err) {
+        showToast(String(err));
+      }
+    });
+  });
+}
 
 function renderGraph() {
   const el = $("graph-view");
-  if (!files.length) {
-    el.innerHTML = `<div class="chart-empty">Track some files to see them here.</div>`;
+  const countEl = $("graph-count");
+  const nodes = graphData.nodes || [];
+  const edges = graphData.edges || [];
+  countEl.textContent = `${edges.length} link${edges.length === 1 ? "" : "s"}`;
+
+  if (!nodes.length) {
+    el.innerHTML = `<div class="chart-empty" style="padding:24px">Track some files, then link related ones here.</div>`;
+    renderGraphSide();
     return;
   }
-  const W = 800;
-  const H = 520;
-  const cx = W / 2;
-  const cy = H / 2;
-  const radius = Math.min(W, H) / 2 - 80;
-  const center = projectLabelEl.textContent.replace(/^Project:\s*/, "") || "Strata";
-  const nodes = files.map((f, i) => {
-    const angle = (i / files.length) * Math.PI * 2 - Math.PI / 2;
-    return { f, x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius };
-  });
-  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
-    ${nodes.map((n) => `<line class="g-edge" x1="${cx}" y1="${cy}" x2="${n.x}" y2="${n.y}"/>`).join("")}
-    <circle class="g-node center" cx="${cx}" cy="${cy}" r="44"/>
-    <text x="${cx}" y="${cy + 4}" text-anchor="middle" font-weight="600">${escapeHtml(center)}</text>
-    ${nodes
-      .map(
-        (n) => `<g style="cursor:pointer" data-path="${escapeHtml(n.f.path)}">
-          <circle class="g-node" cx="${n.x}" cy="${n.y}" r="26"/>
-          <text x="${n.x}" y="${n.y + 3}" text-anchor="middle" font-size="10" font-weight="700">${fileBadge(n.f.path)}</text>
-          <text x="${n.x}" y="${n.y + 44}" text-anchor="middle">${escapeHtml(baseName(n.f.path))}</text>
-        </g>`
-      )
-      .join("")}
-  </svg>`;
+
+  const W = 900;
+  const H = 560;
+  const placed = layoutGraphNodes(nodes, edges, W, H);
+  const byPath = Object.fromEntries(placed.map((n) => [n.path, n]));
+  const neighborSet = new Set(graphSelectedPath ? neighborPaths(graphSelectedPath) : []);
+
+  const edgeLines = edges
+    .map((e) => {
+      const a = byPath[e.from];
+      const b = byPath[e.to];
+      if (!a || !b) return "";
+      const active = graphSelectedPath && (e.from === graphSelectedPath || e.to === graphSelectedPath);
+      return `<line class="g-edge${active ? " active" : ""}" x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}">
+        <title>${escapeHtml(e.note || `${baseName(e.from)} ↔ ${baseName(e.to)}`)}</title>
+      </line>`;
+    })
+    .join("");
+
+  const nodeGroups = placed
+    .map((n) => {
+      const selected = n.path === graphSelectedPath;
+      const isNeighbor = neighborSet.has(n.path);
+      const cls = `g-node${selected ? " selected" : ""}${isNeighbor ? " neighbor" : ""}`;
+      return `<g data-path="${escapeHtml(n.path)}" style="cursor:pointer">
+        <circle class="${cls}" cx="${n.x}" cy="${n.y}" r="28">
+          <title>${escapeHtml(n.path)}</title>
+        </circle>
+        <text class="g-badge" x="${n.x}" y="${n.y + 3}" text-anchor="middle">${fileBadge(n.path)}</text>
+        <text class="g-label" x="${n.x}" y="${n.y + 46}" text-anchor="middle">${escapeHtml(n.name || baseName(n.path))}</text>
+      </g>`;
+    })
+    .join("");
+
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">${edgeLines}${nodeGroups}</svg>`;
   el.querySelectorAll("g[data-path]").forEach((g) => {
     g.addEventListener("click", () => {
+      graphSelectedPath = g.dataset.path;
+      renderGraph();
+    });
+    g.addEventListener("dblclick", () => {
       setAppMode("files");
       selectFile(g.dataset.path);
     });
   });
+  renderGraphSide();
+}
+
+function openLinkModal(preferA = null) {
+  const aSel = $("link-a");
+  const bSel = $("link-b");
+  aSel.innerHTML = "";
+  bSel.innerHTML = "";
+  for (const f of files) {
+    const optA = document.createElement("option");
+    optA.value = f.path;
+    optA.textContent = baseName(f.path);
+    aSel.appendChild(optA);
+    const optB = document.createElement("option");
+    optB.value = f.path;
+    optB.textContent = baseName(f.path);
+    bSel.appendChild(optB);
+  }
+  if (!files.length) {
+    showToast("Track at least two files first");
+    return;
+  }
+  if (preferA && files.some((f) => f.path === preferA)) aSel.value = preferA;
+  const other = files.find((f) => f.path !== aSel.value);
+  if (other) bSel.value = other.path;
+  $("link-note").value = "";
+  $("link-modal-hint").textContent = "";
+  $("link-modal").classList.remove("hidden");
+}
+
+function closeLinkModal() {
+  $("link-modal").classList.add("hidden");
+}
+
+async function confirmLink() {
+  const a = $("link-a").value;
+  const b = $("link-b").value;
+  const note = $("link-note").value;
+  if (!a || !b) {
+    $("link-modal-hint").textContent = "Pick two files";
+    return;
+  }
+  if (a === b) {
+    $("link-modal-hint").textContent = "Pick two different files";
+    return;
+  }
+  try {
+    await LinkFiles(a, b, note);
+    closeLinkModal();
+    graphSelectedPath = a;
+    showToast(`Linked ${baseName(a)} ↔ ${baseName(b)}`);
+    await loadGraph();
+  } catch (err) {
+    $("link-modal-hint").textContent = err.message || String(err);
+  }
 }
 
 /* ———————————————————— Wiring ———————————————————— */
@@ -1124,6 +1367,16 @@ $("nav-files").addEventListener("click", () => setAppMode("files"));
 $("nav-stats").addEventListener("click", () => setAppMode("stats"));
 $("nav-graph").addEventListener("click", () => setAppMode("graph"));
 $("refresh-stats").addEventListener("click", loadDashboard);
+$("link-files-btn").addEventListener("click", () => openLinkModal(graphSelectedPath));
+$("link-cancel").addEventListener("click", closeLinkModal);
+$("link-confirm").addEventListener("click", confirmLink);
+$("link-modal").addEventListener("click", (e) => {
+  if (e.target === $("link-modal")) closeLinkModal();
+});
+$("link-note").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") confirmLink();
+  if (e.key === "Escape") closeLinkModal();
+});
 
 $("add-btn").addEventListener("click", addFileFlow);
 $("empty-add-btn").addEventListener("click", addFileFlow);
