@@ -7,6 +7,7 @@ import (
 
 	"github.com/Derek-Wadsworth/Strata/internal/api"
 	"github.com/Derek-Wadsworth/Strata/internal/diff"
+	"github.com/Derek-Wadsworth/Strata/internal/graph"
 	"github.com/Derek-Wadsworth/Strata/internal/stats"
 	"github.com/Derek-Wadsworth/Strata/internal/tracker"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -349,4 +350,28 @@ func (a *App) GetDashboard() (stats.Dashboard, error) {
 		return stats.Dashboard{}, fmt.Errorf("app not ready")
 	}
 	return a.client.Dashboard()
+}
+
+// GetGraph returns tracked files and the links between them.
+func (a *App) GetGraph() (graph.Graph, error) {
+	if a.client == nil {
+		return graph.Graph{}, fmt.Errorf("app not ready")
+	}
+	return a.client.Graph()
+}
+
+// LinkFiles relates two tracked files. note may be empty.
+func (a *App) LinkFiles(pathA, pathB, note string) (graph.Edge, error) {
+	if a.client == nil {
+		return graph.Edge{}, fmt.Errorf("app not ready")
+	}
+	return a.client.Link(pathA, pathB, note)
+}
+
+// UnlinkFiles removes a relationship between two tracked files.
+func (a *App) UnlinkFiles(pathA, pathB string) error {
+	if a.client == nil {
+		return fmt.Errorf("app not ready")
+	}
+	return a.client.Unlink(pathA, pathB)
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/Derek-Wadsworth/Strata/internal/config"
 	"github.com/Derek-Wadsworth/Strata/internal/daemon"
 	"github.com/Derek-Wadsworth/Strata/internal/db"
+	"github.com/Derek-Wadsworth/Strata/internal/graph"
 	"github.com/Derek-Wadsworth/Strata/internal/stats"
 	"github.com/Derek-Wadsworth/Strata/internal/store"
 	"github.com/Derek-Wadsworth/Strata/internal/tracker"
@@ -151,6 +152,26 @@ func (c *Client) CreateBranch(path, name string, fromVersion int) (tracker.Branc
 // SetVersionTitle sets or clears a version display title.
 func (c *Client) SetVersionTitle(path string, versionNum int, title string) error {
 	return c.tracker.SetVersionTitle(path, versionNum, title)
+}
+
+// Graph returns active files and links between them.
+func (c *Client) Graph() (graph.Graph, error) {
+	return c.tracker.Graph()
+}
+
+// Link relates two tracked files.
+func (c *Client) Link(pathA, pathB, note string) (graph.Edge, error) {
+	return c.tracker.Link(pathA, pathB, note)
+}
+
+// Unlink removes a relationship between two tracked files.
+func (c *Client) Unlink(pathA, pathB string) error {
+	return c.tracker.Unlink(pathA, pathB)
+}
+
+// Neighbors returns files linked to path.
+func (c *Client) Neighbors(path string) ([]graph.Node, error) {
+	return c.tracker.Neighbors(path)
 }
 
 // Restore writes a version back to disk.

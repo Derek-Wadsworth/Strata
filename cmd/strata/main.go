@@ -170,6 +170,74 @@ func run(args []string) error {
 		})
 	case "branch":
 		return runBranch(args[1:])
+	case "link":
+		if len(args) < 3 {
+			return fmt.Errorf("usage: strata link <file-a> <file-b> [note]")
+		}
+		note := ""
+		if len(args) > 3 {
+			note = args[3]
+			for _, part := range args[4:] {
+				note += " " + part
+			}
+		}
+		return withClient(nil, func(c *api.Client) error {
+			edge, err := c.Link(args[1], args[2], note)
+			if err != nil {
+				return err
+			}
+			fmt.Printf("linked %s ↔ %s", edge.From, edge.To)
+			if edge.Note != "" {
+				fmt.Printf(" (%s)", edge.Note)
+			}
+			fmt.Println()
+			return nil
+		})
+	case "unlink":
+		if len(args) != 3 {
+			return fmt.Errorf("usage: strata unlink <file-a> <file-b>")
+		}
+		return withClient(nil, func(c *api.Client) error {
+			if err := c.Unlink(args[1], args[2]); err != nil {
+				return err
+			}
+			a, _ := c.AbsPath(args[1])
+			b, _ := c.AbsPath(args[2])
+			fmt.Printf("unlinked %s ↔ %s\n", a, b)
+			return nil
+		})
+	case "graph":
+		return withClient(nil, func(c *api.Client) error {
+			g, err := c.Graph()
+			if err != nil {
+				return err
+			}
+			if len(g.Nodes) == 0 {
+				fmt.Println("no tracked files")
+				return nil
+			}
+			fmt.Printf("%d file(s), %d link(s)\n", len(g.Nodes), len(g.Edges))
+			for _, n := range g.Nodes {
+				mark := ""
+				if n.Missing {
+					mark = " [missing]"
+				}
+				fmt.Printf("  %s (%d versions)%s\n", n.Path, n.VersionCount, mark)
+			}
+			if len(g.Edges) == 0 {
+				fmt.Println("no links")
+				return nil
+			}
+			fmt.Println("links:")
+			for _, e := range g.Edges {
+				if e.Note != "" {
+					fmt.Printf("  %s ↔ %s — %s\n", e.From, e.To, e.Note)
+				} else {
+					fmt.Printf("  %s ↔ %s\n", e.From, e.To)
+				}
+			}
+			return nil
+		})
 	case "title":
 		if len(args) < 4 {
 			return fmt.Errorf("usage: strata title <file> <version> <title>")
