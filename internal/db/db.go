@@ -144,6 +144,22 @@ INSERT INTO file_state(file_id, current_branch)
 SELECT id, 'main' FROM files;
 `,
 		},
+		{
+			version: 4,
+			sql: `
+CREATE TABLE file_links (
+	id INTEGER PRIMARY KEY,
+	a_id INTEGER NOT NULL REFERENCES files(id),
+	b_id INTEGER NOT NULL REFERENCES files(id),
+	note TEXT,
+	created_at TEXT NOT NULL,
+	CHECK (a_id < b_id),
+	UNIQUE(a_id, b_id)
+);
+CREATE INDEX idx_file_links_a ON file_links(a_id);
+CREATE INDEX idx_file_links_b ON file_links(b_id);
+`,
+		},
 	}
 
 	for _, m := range migrations {
