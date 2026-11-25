@@ -1250,7 +1250,7 @@ function renderDashboard(dash) {
     <div class="stat-card"><span>Active time</span><strong>${formatMinutes(dash.estimatedActiveMinutes || 0)}</strong></div>
     <div class="stat-card"><span>Sessions</span><strong>${dash.sessionCount || 0}</strong></div>`;
   renderBarChart($("edits-chart"), dash.editsPerDay || [], (d) => d.day.slice(5), (d) => d.count);
-  renderBarChart($("active-chart"), dash.mostActive || [], (d) => d.name, (d) => d.versions);
+  renderHBarChart($("active-chart"), dash.mostActive || [], (d) => d.name, (d) => d.versions);
   renderHeatmap($("heatmap"), dash.heatmap || []);
   renderSizeChart($("size-chart"), dash.files || []);
   renderSessions($("session-list"), dash.sessions || []);
@@ -1275,6 +1275,40 @@ function renderBarChart(el, rows, labelFn, valueFn) {
     })
     .join("");
   el.innerHTML = `<svg viewBox="0 0 ${width} 160" width="100%" height="160">${bars}</svg>`;
+}
+
+function truncateLabel(label, max = 22) {
+  if (!label || label.length <= max) return label || "";
+  return `${label.slice(0, max - 1)}…`;
+}
+
+function renderHBarChart(el, rows, labelFn, valueFn) {
+  if (!rows.length) {
+    el.innerHTML = `<div class="chart-empty">No data yet</div>`;
+    return;
+  }
+  const max = Math.max(...rows.map(valueFn), 1);
+  const labelW = 130;
+  const barMaxW = 200;
+  const rowH = 28;
+  const padTop = 8;
+  const width = labelW + barMaxW + 48;
+  const height = Math.max(120, padTop + rows.length * rowH + 8);
+  const bars = rows
+    .map((row, i) => {
+      const v = valueFn(row);
+      const full = String(labelFn(row) || "");
+      const short = truncateLabel(full);
+      const w = Math.max(2, Math.round((v / max) * barMaxW));
+      const y = padTop + i * rowH;
+      return `<text class="hbar-label" x="${labelW - 10}" y="${y + 14}" text-anchor="end">
+          <title>${escapeHtml(full)}</title>${escapeHtml(short)}
+        </text>
+        <rect class="bar" x="${labelW}" y="${y + 2}" width="${w}" height="16" rx="3"></rect>
+        <text class="hbar-value" x="${labelW + w + 8}" y="${y + 14}">${v}</text>`;
+    })
+    .join("");
+  el.innerHTML = `<svg class="hbar" viewBox="0 0 ${width} ${height}" width="100%" height="${height}">${bars}</svg>`;
 }
 
 function renderHeatmap(el, days) {

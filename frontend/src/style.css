@@ -1222,6 +1222,16 @@ textarea {
   font-family: var(--font);
 }
 
+.chart svg text.hbar-label {
+  font-size: 11px;
+  fill: var(--ink);
+}
+
+.chart svg text.hbar-value {
+  font-size: 11px;
+  fill: var(--ink-faint);
+}
+
 .chart .bar {
   fill: var(--blue);
 }
